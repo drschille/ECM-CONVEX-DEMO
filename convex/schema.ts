@@ -38,4 +38,17 @@ export default defineSchema({
   })
   .index("by_product_number", ["productNumber"])
   .index("by_drawing_number", ["drawingNumber"]),
+  items: defineTable({
+    partNumber: v.string(),
+    drawingNumbers: v.array(v.string()),
+    revision: v.string(),
+    name: v.string(),
+    description: v.string(),
+    itemType: v.union(
+      v.literal("product"),
+      v.literal("raw material"),
+      v.literal("service"),
+    ),
+  })
+  .index("by_part_number", ["partNumber"]),
 });
