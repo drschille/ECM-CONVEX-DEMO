@@ -37,6 +37,10 @@ export default defineSchema({
     year: v.number(),
     lastNumber: v.number(),
   }).index("by_year", ["year"]),
+  changeNoticeSequences: defineTable({
+    year: v.number(),
+    lastNumber: v.number(),
+  }).index("by_year", ["year"]),
   changeRequestTargets: defineTable({
     changeRequestId: v.id("changeRequests"),
     itemId: v.id("items"),

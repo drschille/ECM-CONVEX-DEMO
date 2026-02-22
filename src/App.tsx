@@ -134,9 +134,12 @@ function SignInForm() {
 }
 
 function Content() {
-  const notices = useQuery(api.changes.changeNotices, {}) ?? [];
-  const suggestedNoticeId = useQuery(api.changes.nextChangeNoticeId, {});
-  const addChangeNotice = useMutation(api.changes.addChangeNotice);
+  const requests = useQuery(api.changes.changeNotices, {}) ?? [];
+  const notifications = useQuery(api.changes.changeNotifications, {}) ?? [];
+  const suggestedRequestId = useQuery(api.changes.nextChangeNoticeId, {});
+  const suggestedNotificationId = useQuery(api.changes.nextChangeNotificationId, {});
+  const addChangeRequest = useMutation(api.changes.addChangeNotice);
+  const addChangeNotification = useMutation(api.changes.addChangeNotification);
   const startChangeNotice = useMutation(api.changes.startChangeNotice);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -147,17 +150,14 @@ function Content() {
   const [activeLane, setActiveLane] = useState<"requests" | "notifications">("requests");
   const [selectedNoticeId, setSelectedNoticeId] = useState<string | null>(null);
 
-  const proposedCount = notices.filter((notice) => notice.state === "proposed").length;
-  const startedCount = notices.filter((notice) => notice.state === "started").length;
-  const completedCount = notices.filter((notice) => notice.state === "completed").length;
-  const requestNotices = notices.filter(
-    (notice) => notice.state === "proposed" || notice.state === "started",
-  );
-  const notificationNotices = notices.filter(
-    (notice) => notice.state === "completed" || notice.state === "cancelled",
-  );
+  const proposedCount = requests.filter((notice) => notice.state === "proposed").length;
+  const startedCount = requests.filter((notice) => notice.state === "started").length;
+  const completedCount = requests.filter((notice) => notice.state === "completed").length;
+  const requestNotices = requests;
+  const notificationNotices = notifications;
   const visibleNotices = activeLane === "requests" ? requestNotices : notificationNotices;
-  const selectedNotice = notices.find((notice) => String(notice._id) === selectedNoticeId) ?? null;
+  const selectedNotice =
+    requests.find((notice) => String(notice._id) === selectedNoticeId) ?? null;
 
   const openCreateModal = () => {
     setCreateError(null);
@@ -183,7 +183,11 @@ function Content() {
     setIsCreating(true);
     setCreateError(null);
     try {
-      await addChangeNotice({ description });
+      if (activeLane === "requests") {
+        await addChangeRequest({ description });
+      } else {
+        await addChangeNotification({ description });
+      }
       closeCreateModal();
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : "Failed to add change notice.");
@@ -193,7 +197,7 @@ function Content() {
   };
 
   const handleCardClick = async (notice: {
-    _id: (typeof notices)[number]["_id"];
+    _id: (typeof requests)[number]["_id"];
     id: string;
     state: ChangeNoticeState;
   }) => {
@@ -254,7 +258,7 @@ function Content() {
             <StatTile label="Proposed" value={String(proposedCount)} />
             <StatTile label="Started" value={String(startedCount)} />
             <StatTile label="Completed" value={String(completedCount)} />
-            <StatTile label="Total" value={String(notices.length)} />
+            <StatTile label="Total" value={String(requests.length + notifications.length)} />
           </div>
         </aside>
 
@@ -277,7 +281,7 @@ function Content() {
               onClick={openCreateModal}
               type="button"
             >
-              New ECN
+              {activeLane === "requests" ? "New Request" : "New Notice"}
             </button>
           </div>
 
@@ -296,7 +300,8 @@ function Content() {
                 state={notice.state}
                 author={notice.author}
                 timestamp={notice.timestamp}
-                isClickable={notice.state === "proposed"}
+                isClickable={activeLane === "requests" && notice.state === "proposed"}
+                canOpenWorkspace={activeLane === "requests"}
                 isBusy={startingNoticeId === String(notice._id)}
                 isSelected={selectedNoticeId === String(notice._id)}
                 onClick={() => void handleCardClick(notice)}
@@ -341,7 +346,7 @@ function Content() {
                   className="text-lg font-semibold text-slate-900 dark:text-slate-100"
                   id="new-ecn-title"
                 >
-                  New Change Notice
+                  {activeLane === "requests" ? "New Request" : "New Notice"}
                 </h2>
                 <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                   Suggested ID uses the current year and the next running number.
@@ -360,7 +365,9 @@ function Content() {
               <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-950">
                 <p className="text-slate-600 dark:text-slate-300">Next ID (server-generated)</p>
                 <p className="mt-1 font-mono text-slate-900 dark:text-slate-100">
-                  {suggestedNoticeId ?? "Loading suggestion..."}
+                  {(activeLane === "requests"
+                    ? suggestedRequestId
+                    : suggestedNotificationId) ?? "Loading suggestion..."}
                 </p>
               </div>
 
@@ -374,7 +381,7 @@ function Content() {
                 />
               </label>
 
-              {suggestedNoticeId && (
+              {(activeLane === "requests" ? suggestedRequestId : suggestedNotificationId) && (
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Final ID is assigned in the backend at submit time to avoid duplicate IDs.
                 </p>
@@ -399,7 +406,11 @@ function Content() {
                   disabled={isCreating}
                   type="submit"
                 >
-                  {isCreating ? "Creating..." : "Create notice"}
+                  {isCreating
+                    ? "Creating..."
+                    : activeLane === "requests"
+                      ? "Create request"
+                      : "Create notice"}
                 </button>
               </div>
             </form>
@@ -920,6 +931,7 @@ function ResourceCard({
   author,
   timestamp,
   isClickable,
+  canOpenWorkspace,
   isBusy,
   isSelected,
   onClick,
@@ -931,6 +943,7 @@ function ResourceCard({
   author: string;
   timestamp: number;
   isClickable: boolean;
+  canOpenWorkspace: boolean;
   isBusy: boolean;
   isSelected: boolean;
   onClick: () => void;
@@ -970,16 +983,18 @@ function ResourceCard({
           {title}
         </p>
         <div className="flex items-center gap-2">
-          <button
-            className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-white/60 dark:border-slate-600 dark:hover:bg-slate-800"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpen();
-            }}
-            type="button"
-          >
-            Open
-          </button>
+          {canOpenWorkspace && (
+            <button
+              className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-white/60 dark:border-slate-600 dark:hover:bg-slate-800"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpen();
+              }}
+              type="button"
+            >
+              Open
+            </button>
+          )}
           <span
             className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${stateLabelClass[state]}`}
           >

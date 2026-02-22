@@ -50,6 +50,31 @@ async function getBootstrappedLastSequence(ctx: { db: any }, year: number) {
     return { row: null, lastNumber: maxExistingSequence };
 }
 
+async function getStoredNoticeSequence(ctx: { db: any }, year: number) {
+    return await ctx.db
+        .query("changeNoticeSequences")
+        .withIndex("by_year", (q: any) => q.eq("year", year))
+        .unique();
+}
+
+async function getBootstrappedLastNoticeSequence(ctx: { db: any }, year: number) {
+    const sequence = await getStoredNoticeSequence(ctx, year);
+    if (sequence) {
+        return { row: sequence, lastNumber: sequence.lastNumber };
+    }
+
+    const noticesForYear = await ctx.db
+        .query("changeNotices")
+        .withIndex("change_notices_by_year", (q: any) => q.eq("year", year))
+        .collect();
+    const maxExistingSequence = noticesForYear.reduce((max: number, notice: { id: string }) => {
+        const parsed = parseSequenceFromId(notice.id, year);
+        return parsed !== null ? Math.max(max, parsed) : max;
+    }, 0);
+
+    return { row: null, lastNumber: maxExistingSequence };
+}
+
 async function requireUserIdentity(ctx: { auth: any }) {
     const user = await ctx.auth.getUserIdentity();
     if (!user) {
@@ -111,6 +136,58 @@ async function createChangeNoticeWithNextId(
     return { noticeId, id, year };
 }
 
+async function createChangeNotificationWithNextId(
+    ctx: { db: any },
+    params: { description?: string; author: string; now?: number },
+) {
+    const now = params.now ?? Date.now();
+    const year = new Date(now).getFullYear();
+    const { row: sequenceRow, lastNumber } = await getBootstrappedLastNoticeSequence(ctx, year);
+    let nextNumber = lastNumber + 1;
+    let id = formatSuggestedChangeNoticeId(year, nextNumber);
+
+    while (true) {
+        if (nextNumber > 9999) {
+            throw new Error(`Change notice sequence overflow for ${year}`);
+        }
+
+        const existing = await ctx.db
+            .query("changeNotices")
+            .withIndex("change_notices_by_year", (q: any) =>
+                q.eq("year", year).eq("id", id)
+            )
+            .unique();
+        if (!existing) {
+            break;
+        }
+
+        nextNumber += 1;
+        id = formatSuggestedChangeNoticeId(year, nextNumber);
+    }
+
+    if (sequenceRow) {
+        await ctx.db.patch("changeNoticeSequences", sequenceRow._id, {
+            lastNumber: nextNumber,
+        });
+    } else {
+        await ctx.db.insert("changeNoticeSequences", {
+            year,
+            lastNumber: nextNumber,
+        });
+    }
+
+    const noticeId = await ctx.db.insert("changeNotices", {
+        id,
+        author: params.author,
+        description: params.description ?? "",
+        timestamp: now,
+        year,
+        state: "proposed",
+    });
+
+    return { noticeId, id, year };
+}
+
 export const changeNotices = query({
     args: { year: v.optional(v.number()) },
     handler: async (ctx, args) => {
@@ -138,6 +215,27 @@ export const nextChangeNoticeId = query({
     },
 });
 
+export const changeNotifications = query({
+    args: { year: v.optional(v.number()) },
+    handler: async (ctx, args) => {
+        const year = args.year ?? new Date().getFullYear();
+        return await ctx.db
+            .query("changeNotices")
+            .withIndex("change_notices_by_year", (q) => q.eq("year", year))
+            .order("asc")
+            .take(100);
+    },
+});
+
+export const nextChangeNotificationId = query({
+    args: { year: v.optional(v.number()) },
+    handler: async (ctx, args) => {
+        const year = args.year ?? new Date().getFullYear();
+        const { lastNumber } = await getBootstrappedLastNoticeSequence(ctx, year);
+        return formatSuggestedChangeNoticeId(year, lastNumber + 1);
+    },
+});
+
 export const addChangeNotice = mutation({
     args: {
         description: v.optional(v.string()),
@@ -145,6 +243,20 @@ export const addChangeNotice = mutation({
     handler: async (ctx, args) => {
         const user = await requireUserIdentity(ctx);
         const created = await createChangeNoticeWithNextId(ctx, {
+            description: args.description,
+            author: user.name ?? user.email ?? "Unknown",
+        });
+        return { id: created.id };
+    },
+});
+
+export const addChangeNotification = mutation({
+    args: {
+        description: v.optional(v.string()),
+    },
+    handler: async (ctx, args) => {
+        const user = await requireUserIdentity(ctx);
+        const created = await createChangeNotificationWithNextId(ctx, {
             description: args.description,
             author: user.name ?? user.email ?? "Unknown",
         });
