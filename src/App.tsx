@@ -292,22 +292,41 @@ function Content() {
               </div>
             )}
 
-            {visibleNotices.map((notice) => (
-              <ResourceCard
-                key={notice._id}
-                title={notice.id}
+            {activeLane === "requests" &&
+              requestNotices.map((notice) => (
+                <ResourceCard
+                  key={notice._id}
+                  title={notice.id}
                 description={notice.description}
                 state={notice.state}
-                author={notice.author}
+                author={notice.authorName ?? notice.authorEmail ?? notice.author}
                 timestamp={notice.timestamp}
-                isClickable={activeLane === "requests" && notice.state === "proposed"}
-                canOpenWorkspace={activeLane === "requests"}
-                isBusy={startingNoticeId === String(notice._id)}
-                isSelected={selectedNoticeId === String(notice._id)}
-                onClick={() => void handleCardClick(notice)}
-                onOpen={() => setSelectedNoticeId(String(notice._id))}
-              />
-            ))}
+                  isClickable={notice.state === "proposed"}
+                  canOpenWorkspace
+                  isBusy={startingNoticeId === String(notice._id)}
+                  isSelected={selectedNoticeId === String(notice._id)}
+                  onClick={() => void handleCardClick(notice)}
+                  onOpen={() => setSelectedNoticeId(String(notice._id))}
+                />
+              ))}
+
+            {activeLane === "notifications" &&
+              notificationNotices.map((notice) => (
+                <ResourceCard
+                  key={notice._id}
+                  title={notice.id}
+                  description={notice.description}
+                  state={notice.state}
+                  author={notice.authorName ?? notice.authorEmail ?? notice.author}
+                  timestamp={notice.timestamp}
+                  isClickable={false}
+                  canOpenWorkspace={false}
+                  isBusy={false}
+                  isSelected={false}
+                  onClick={() => {}}
+                  onOpen={() => {}}
+                />
+              ))}
           </div>
         </section>
 
@@ -964,6 +983,9 @@ function ResourceCard({
     cancelled: "bg-rose-100 text-rose-900 dark:bg-rose-900/30 dark:text-rose-100",
   } as const;
 
+  const authorDisplay =
+    author.includes("|") && !author.includes("@") ? "Unknown (no name/email)" : author;
+
   const cardClass = [
     "flex h-full w-full flex-col gap-3 rounded-xl border p-4 text-left shadow-sm transition",
     colorByState[state],
@@ -1009,7 +1031,7 @@ function ResourceCard({
 
       <div className="mt-auto flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
         <p>Created: {new Date(timestamp).toLocaleString()}</p>
-        <p>Author: {author}</p>
+        <p>Author: {authorDisplay}</p>
         {isClickable && (
           <p className="font-medium text-slate-700 dark:text-slate-200">
             {isBusy ? "Starting..." : 'Click to start this notice'}

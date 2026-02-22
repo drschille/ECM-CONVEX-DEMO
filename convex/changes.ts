@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
 
 function formatSuggestedChangeNoticeId(year: number, sequence: number) {
     return `P${year}-${String(sequence).padStart(4, "0")}`;
@@ -83,9 +84,34 @@ async function requireUserIdentity(ctx: { auth: any }) {
     return user;
 }
 
+function formatActorName(user: { name?: string | null; email?: string | null; subject?: string | null }) {
+    return user.name ?? user.email ?? user.subject ?? "Unknown";
+}
+
+function getAuthorFields(user: { name?: string | null; email?: string | null; subject?: string | null }) {
+    const displayAuthor = user.name ?? user.email ?? "Unknown";
+    return {
+        author: displayAuthor,
+        authorName: user.name ?? undefined,
+        authorEmail: user.email ?? undefined,
+    };
+}
+
+async function getCurrentAuthorFields(ctx: { auth: any; db: any }) {
+    const identity = await requireUserIdentity(ctx);
+    const userId = await getAuthUserId(ctx as any);
+    const userRecord = userId ? await ctx.db.get("users", userId) : null;
+
+    return getAuthorFields({
+        name: userRecord?.name ?? identity.name ?? undefined,
+        email: userRecord?.email ?? identity.email ?? undefined,
+        subject: identity.subject ?? undefined,
+    });
+}
+
 async function createChangeNoticeWithNextId(
     ctx: { db: any },
-    params: { description?: string; author: string; now?: number },
+    params: { description?: string; author: string; authorName?: string; authorEmail?: string; now?: number },
 ) {
     const now = params.now ?? Date.now();
     const year = new Date(now).getFullYear();
@@ -127,6 +153,8 @@ async function createChangeNoticeWithNextId(
     const noticeId = await ctx.db.insert("changeRequests", {
         id,
         author: params.author,
+        authorName: params.authorName,
+        authorEmail: params.authorEmail,
         description: params.description ?? "",
         timestamp: now,
         year,
@@ -138,7 +166,7 @@ async function createChangeNoticeWithNextId(
 
 async function createChangeNotificationWithNextId(
     ctx: { db: any },
-    params: { description?: string; author: string; now?: number },
+    params: { description?: string; author: string; authorName?: string; authorEmail?: string; now?: number },
 ) {
     const now = params.now ?? Date.now();
     const year = new Date(now).getFullYear();
@@ -179,6 +207,8 @@ async function createChangeNotificationWithNextId(
     const noticeId = await ctx.db.insert("changeNotices", {
         id,
         author: params.author,
+        authorName: params.authorName,
+        authorEmail: params.authorEmail,
         description: params.description ?? "",
         timestamp: now,
         year,
@@ -241,10 +271,11 @@ export const addChangeNotice = mutation({
         description: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const user = await requireUserIdentity(ctx);
+        await requireUserIdentity(ctx);
+        const authorFields = await getCurrentAuthorFields(ctx);
         const created = await createChangeNoticeWithNextId(ctx, {
             description: args.description,
-            author: user.name ?? user.email ?? "Unknown",
+            ...authorFields,
         });
         return { id: created.id };
     },
@@ -255,10 +286,11 @@ export const addChangeNotification = mutation({
         description: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const user = await requireUserIdentity(ctx);
+        await requireUserIdentity(ctx);
+        const authorFields = await getCurrentAuthorFields(ctx);
         const created = await createChangeNotificationWithNextId(ctx, {
             description: args.description,
-            author: user.name ?? user.email ?? "Unknown",
+            ...authorFields,
         });
         return { id: created.id };
     },
@@ -530,6 +562,7 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
     },
     handler: async (ctx, args) => {
         const user = await requireUserIdentity(ctx);
+        const authorFields = await getCurrentAuthorFields(ctx);
         const suggestion = await ctx.db.get("requestImpactAnalysisSuggestions", args.suggestionId);
         if (!suggestion) {
             throw new Error("Suggestion not found");
@@ -552,7 +585,7 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
                 args.description ??
                 suggestion.reason ??
                 `Follow-up change notice for ${parentNotice.id}`,
-            author: user.name ?? user.email ?? "Unknown",
+            ...authorFields,
             now,
         });
 
@@ -561,7 +594,7 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
             childChangeRequestId: created.noticeId,
             reason: "follow_up_for_subassembly",
             createdAt: now,
-            createdBy: user.name ?? user.email ?? "Unknown",
+            createdBy: formatActorName(user),
         });
 
         if (suggestion.suggestedItemId) {
@@ -578,7 +611,7 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
             status: "accepted",
             createdChangeRequestId: created.noticeId,
             resolvedAt: now,
-            resolvedBy: user.name ?? user.email ?? "Unknown",
+            resolvedBy: formatActorName(user),
         });
 
         return {

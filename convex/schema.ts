@@ -10,6 +10,8 @@ export default defineSchema({
   changeNotices: defineTable({
     id: v.string(),
     author: v.string(),
+    authorName: v.optional(v.string()),
+    authorEmail: v.optional(v.string()),
     description: v.string(),
     timestamp: v.number(),
     year: v.number(),
@@ -23,6 +25,8 @@ export default defineSchema({
   changeRequests: defineTable({
     id: v.string(),
     author: v.string(),
+    authorName: v.optional(v.string()),
+    authorEmail: v.optional(v.string()),
     description: v.string(),
     timestamp: v.number(),
     year: v.number(),
