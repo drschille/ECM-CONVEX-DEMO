@@ -24,6 +24,72 @@ export default defineSchema({
     year: v.number(),
     lastNumber: v.number(),
   }).index("by_year", ["year"]),
+  changeNoticeTargets: defineTable({
+    changeNoticeId: v.id("changeNotices"),
+    itemId: v.id("items"),
+    targetRole: v.union(
+      v.literal("direct"),
+      v.literal("impacted"),
+      v.literal("candidate"),
+    ),
+    changeType: v.union(
+      v.literal("add"),
+      v.literal("modify"),
+      v.literal("remove"),
+      v.literal("replace"),
+      v.literal("review_only"),
+    ),
+    notes: v.optional(v.string()),
+    plannedRevisionFrom: v.optional(v.string()),
+    plannedRevisionTo: v.optional(v.string()),
+  })
+    .index("by_change_notice", ["changeNoticeId"])
+    .index("by_item", ["itemId"])
+    .index("by_change_notice_role", ["changeNoticeId", "targetRole"]),
+  changeNoticeLinks: defineTable({
+    parentChangeNoticeId: v.id("changeNotices"),
+    childChangeNoticeId: v.id("changeNotices"),
+    reason: v.union(
+      v.literal("depends_on"),
+      v.literal("derived_from"),
+      v.literal("follow_up_for_subassembly"),
+      v.literal("split_scope"),
+      v.literal("related"),
+    ),
+    createdAt: v.number(),
+    createdBy: v.optional(v.string()),
+    notes: v.optional(v.string()),
+  })
+    .index("by_parent", ["parentChangeNoticeId"])
+    .index("by_child", ["childChangeNoticeId"]),
+  impactAnalysisSuggestions: defineTable({
+    changeNoticeId: v.id("changeNotices"),
+    sourceItemId: v.optional(v.id("items")),
+    suggestionType: v.union(
+      v.literal("create_follow_up_ecn"),
+      v.literal("add_missing_item_record"),
+      v.literal("add_impacted_target"),
+      v.literal("review_subassembly"),
+    ),
+    suggestedItemId: v.optional(v.id("items")),
+    suggestedPartNumber: v.optional(v.string()),
+    suggestedDrawingNumber: v.optional(v.string()),
+    suggestedName: v.optional(v.string()),
+    reason: v.string(),
+    status: v.union(
+      v.literal("open"),
+      v.literal("accepted"),
+      v.literal("dismissed"),
+      v.literal("superseded"),
+    ),
+    createdChangeNoticeId: v.optional(v.id("changeNotices")),
+    createdAt: v.number(),
+    resolvedAt: v.optional(v.number()),
+    resolvedBy: v.optional(v.string()),
+  })
+    .index("by_change_notice", ["changeNoticeId", "status"])
+    .index("by_source_item", ["sourceItemId"])
+    .index("by_created_change_notice", ["createdChangeNoticeId"]),
   products: defineTable({
     productNumber: v.string(),
     drawingNumber: v.string(),
@@ -31,7 +97,7 @@ export default defineSchema({
     name: v.string(),
     bom: v.array(
       v.object({
-        partNumber: v.string(),
+        itemId: v.id("items"),
         quantity: v.number(),
       }),
     ),
