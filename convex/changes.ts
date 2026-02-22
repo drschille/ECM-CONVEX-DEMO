@@ -212,6 +212,66 @@ export const addChangeNoticeTarget = mutation({
     },
 });
 
+export const changeNoticeTargetsForEcn = query({
+    args: { changeNoticeId: v.id("changeNotices") },
+    handler: async (ctx, args) => {
+        const targets = await ctx.db
+            .query("changeNoticeTargets")
+            .withIndex("by_change_notice", (q) => q.eq("changeNoticeId", args.changeNoticeId))
+            .collect();
+
+        const targetsWithItems = await Promise.all(
+            targets.map(async (target) => ({
+                ...target,
+                item: await ctx.db.get("items", target.itemId),
+            })),
+        );
+
+        return targetsWithItems;
+    },
+});
+
+export const changeNoticeLinksForEcn = query({
+    args: { changeNoticeId: v.id("changeNotices") },
+    handler: async (ctx, args) => {
+        const [asParent, asChild] = await Promise.all([
+            ctx.db
+                .query("changeNoticeLinks")
+                .withIndex("by_parent", (q) => q.eq("parentChangeNoticeId", args.changeNoticeId))
+                .collect(),
+            ctx.db
+                .query("changeNoticeLinks")
+                .withIndex("by_child", (q) => q.eq("childChangeNoticeId", args.changeNoticeId))
+                .collect(),
+        ]);
+
+        return { asParent, asChild };
+    },
+});
+
+export const impactAnalysisSuggestionsForEcn = query({
+    args: {
+        changeNoticeId: v.id("changeNotices"),
+        status: v.optional(
+            v.union(
+                v.literal("open"),
+                v.literal("accepted"),
+                v.literal("dismissed"),
+                v.literal("superseded"),
+            ),
+        ),
+    },
+    handler: async (ctx, args) => {
+        const status = args.status ?? "open";
+        return await ctx.db
+            .query("impactAnalysisSuggestions")
+            .withIndex("by_change_notice", (q) =>
+                q.eq("changeNoticeId", args.changeNoticeId).eq("status", status)
+            )
+            .collect();
+    },
+});
+
 export const runImpactAnalysisForEcn = mutation({
     args: { changeNoticeId: v.id("changeNotices") },
     handler: async (ctx, args) => {
@@ -221,27 +281,133 @@ export const runImpactAnalysisForEcn = mutation({
             throw new Error("Change notice not found");
         }
 
-        // Starter stub: create a single open suggestion if there are no open suggestions yet.
-        const existingOpen = await ctx.db
+        const targets = await ctx.db
+            .query("changeNoticeTargets")
+            .withIndex("by_change_notice", (q) => q.eq("changeNoticeId", args.changeNoticeId))
+            .collect();
+        const targetedItemIds = new Set(targets.map((target) => String(target.itemId)));
+
+        const openSuggestions = await ctx.db
             .query("impactAnalysisSuggestions")
             .withIndex("by_change_notice", (q) =>
                 q.eq("changeNoticeId", args.changeNoticeId).eq("status", "open")
             )
-            .take(1);
-        if (existingOpen.length > 0) {
-            return { created: 0, message: "Open suggestions already exist for this ECN." };
+            .collect();
+        const openSuggestionKeys = new Set(
+            openSuggestions.map(
+                (s) => `${s.suggestionType}:${s.suggestedItemId ? String(s.suggestedItemId) : ""}`,
+            ),
+        );
+
+        const queuedProductItemIds: string[] = [];
+        for (const target of targets) {
+            if (target.targetRole !== "direct") {
+                continue;
+            }
+            const item = await ctx.db.get("items", target.itemId);
+            if (item?.itemType === "product") {
+                queuedProductItemIds.push(String(item._id));
+            }
         }
 
+        const visitedProductItemIds = new Set<string>();
+        let created = 0;
+        let skippedDuplicates = 0;
         const now = Date.now();
-        await ctx.db.insert("impactAnalysisSuggestions", {
-            changeNoticeId: args.changeNoticeId,
-            suggestionType: "review_subassembly",
-            reason: "Impact analysis stub: review nested product BOMs and create follow-up ECNs where needed.",
-            status: "open",
-            createdAt: now,
-        });
 
-        return { created: 1, message: "Created a starter impact-analysis suggestion." };
+        while (queuedProductItemIds.length > 0) {
+            const productItemIdString = queuedProductItemIds.shift();
+            if (!productItemIdString || visitedProductItemIds.has(productItemIdString)) {
+                continue;
+            }
+            visitedProductItemIds.add(productItemIdString);
+
+            const productItem = await ctx.db.get("items", productItemIdString as any);
+            if (!productItem || productItem.itemType !== "product") {
+                continue;
+            }
+
+            const productRecord = await ctx.db
+                .query("products")
+                .withIndex("by_product_number", (q) => q.eq("productNumber", productItem.partNumber))
+                .unique();
+
+            if (!productRecord) {
+                const key = `create_follow_up_ecn:${String(productItem._id)}`;
+                if (!targetedItemIds.has(String(productItem._id)) && !openSuggestionKeys.has(key)) {
+                    await ctx.db.insert("impactAnalysisSuggestions", {
+                        changeNoticeId: args.changeNoticeId,
+                        sourceItemId: productItem._id,
+                        suggestionType: "create_follow_up_ecn",
+                        suggestedItemId: productItem._id,
+                        suggestedPartNumber: productItem.partNumber,
+                        suggestedName: productItem.name,
+                        reason:
+                            `Nested product item ${productItem.partNumber} (${productItem.name}) ` +
+                            "is referenced but has no product BOM record. Consider creating a follow-up ECN.",
+                        status: "open",
+                        createdAt: now,
+                    });
+                    openSuggestionKeys.add(key);
+                    created += 1;
+                } else {
+                    skippedDuplicates += 1;
+                }
+                continue;
+            }
+
+            for (const line of productRecord.bom) {
+                const childItem = await ctx.db.get("items", line.itemId);
+                if (!childItem) {
+                    continue;
+                }
+                if (childItem.itemType !== "product") {
+                    continue;
+                }
+
+                queuedProductItemIds.push(String(childItem._id));
+
+                if (targetedItemIds.has(String(childItem._id))) {
+                    continue;
+                }
+
+                const childProductRecord = await ctx.db
+                    .query("products")
+                    .withIndex("by_product_number", (q) => q.eq("productNumber", childItem.partNumber))
+                    .unique();
+                const suggestionType = childProductRecord
+                    ? "add_impacted_target"
+                    : "create_follow_up_ecn";
+                const key = `${suggestionType}:${String(childItem._id)}`;
+
+                if (openSuggestionKeys.has(key)) {
+                    skippedDuplicates += 1;
+                    continue;
+                }
+
+                await ctx.db.insert("impactAnalysisSuggestions", {
+                    changeNoticeId: args.changeNoticeId,
+                    sourceItemId: productItem._id,
+                    suggestionType,
+                    suggestedItemId: childItem._id,
+                    suggestedPartNumber: childItem.partNumber,
+                    suggestedName: childItem.name,
+                    reason: childProductRecord
+                        ? `Nested product item ${childItem.partNumber} (${childItem.name}) is used in BOM and should be reviewed as an impacted target.`
+                        : `Nested product item ${childItem.partNumber} (${childItem.name}) is used in BOM and has no product BOM record. Consider creating a follow-up ECN.`,
+                    status: "open",
+                    createdAt: now,
+                });
+                openSuggestionKeys.add(key);
+                created += 1;
+            }
+        }
+
+        return {
+            created,
+            skippedDuplicates,
+            inspectedDirectTargets: targets.filter((t) => t.targetRole === "direct").length,
+        };
     },
 });
 
