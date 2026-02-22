@@ -144,10 +144,12 @@ function Content() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [startingNoticeId, setStartingNoticeId] = useState<string | null>(null);
+  const [selectedNoticeId, setSelectedNoticeId] = useState<string | null>(null);
 
   const proposedCount = notices.filter((notice) => notice.state === "proposed").length;
   const startedCount = notices.filter((notice) => notice.state === "started").length;
   const completedCount = notices.filter((notice) => notice.state === "completed").length;
+  const selectedNotice = notices.find((notice) => String(notice._id) === selectedNoticeId) ?? null;
 
   const openCreateModal = () => {
     setCreateError(null);
@@ -255,9 +257,17 @@ function Content() {
             isClickable={notice.state === "proposed"}
             isBusy={startingNoticeId === String(notice._id)}
             onClick={() => void handleCardClick(notice)}
+            onOpen={() => setSelectedNoticeId(String(notice._id))}
           />
         ))}
       </section>
+
+      {selectedNotice && (
+        <EcnWorkspace
+          notice={selectedNotice}
+          onClose={() => setSelectedNoticeId(null)}
+        />
+      )}
 
       {isCreateOpen && (
         <div
@@ -347,6 +357,418 @@ function Content() {
   );
 }
 
+function EcnWorkspace({
+  notice,
+  onClose,
+}: {
+  notice: {
+    _id: unknown;
+    id: string;
+    state: ChangeNoticeState;
+    description: string;
+  };
+  onClose: () => void;
+}) {
+  const targets = useQuery(api.changes.changeNoticeTargetsForEcn, {
+    changeNoticeId: notice._id as never,
+  });
+  const suggestions = useQuery(api.changes.impactAnalysisSuggestionsForEcn, {
+    changeNoticeId: notice._id as never,
+  });
+  const links = useQuery(api.changes.changeNoticeLinksForEcn, {
+    changeNoticeId: notice._id as never,
+  });
+  const items = useQuery(api.products.listItems, {}) ?? [];
+  const products = useQuery(api.products.listProducts, {}) ?? [];
+
+  const addTarget = useMutation(api.changes.addChangeNoticeTarget);
+  const runImpactAnalysis = useMutation(api.changes.runImpactAnalysisForEcn);
+  const acceptFollowUp = useMutation(api.changes.acceptSuggestionCreateFollowUpEcn);
+  const importPdmProduct = useMutation(api.products.importProductBomFromPdmPlaceholder);
+
+  const [selectedProductNumber, setSelectedProductNumber] = useState("");
+  const [targetRole, setTargetRole] = useState<"direct" | "impacted" | "candidate">("direct");
+  const [changeType, setChangeType] = useState<"modify" | "add" | "remove" | "replace" | "review_only">(
+    "modify",
+  );
+  const [targetNotes, setTargetNotes] = useState("");
+  const [targetError, setTargetError] = useState<string | null>(null);
+  const [targetStatus, setTargetStatus] = useState<string | null>(null);
+  const [analysisStatus, setAnalysisStatus] = useState<string | null>(null);
+  const [pdmJson, setPdmJson] = useState(
+    JSON.stringify(
+      {
+        sourceSystem: "autodesk_vault_professional",
+        externalProductId: "Vault:12345",
+        product: {
+          productNumber: "ASM-1000",
+          drawingNumber: "DWG-ASM-1000",
+          revision: "A",
+          name: "Top Assembly",
+          description: "Imported from PDM placeholder payload",
+        },
+        bomLines: [
+          {
+            partNumber: "SUB-2000",
+            drawingNumbers: ["DWG-SUB-2000"],
+            revision: "A",
+            name: "Sub Assembly",
+            itemType: "product",
+            quantity: 1,
+          },
+          {
+            partNumber: "RM-STEEL-PLATE",
+            revision: "1",
+            name: "Steel Plate",
+            itemType: "raw material",
+            quantity: 2,
+          },
+          {
+            partNumber: "SVC-LASER-CUT",
+            name: "Laser Cutting Service",
+            itemType: "service",
+            quantity: 1,
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+  const [pdmStatus, setPdmStatus] = useState<string | null>(null);
+  const [pdmResult, setPdmResult] = useState<string | null>(null);
+
+  const productOptions = products
+    .map((product) => {
+      const item = items.find(
+        (candidate) =>
+          candidate.itemType === "product" && candidate.partNumber === product.productNumber,
+      );
+      return {
+        product,
+        item,
+      };
+    })
+    .filter((entry) => entry.item);
+
+  const handleAddProductTarget = async () => {
+    if (!selectedProductNumber) {
+      setTargetError("Select a product to add to this ECN.");
+      return;
+    }
+
+    const selected = productOptions.find(
+      (entry) => entry.product.productNumber === selectedProductNumber,
+    );
+    if (!selected?.item) {
+      setTargetError("Could not find the matching product item record.");
+      return;
+    }
+
+    setTargetError(null);
+    setTargetStatus(null);
+    try {
+      const result = await addTarget({
+        changeNoticeId: notice._id as never,
+        itemId: selected.item._id as never,
+        targetRole,
+        changeType,
+        notes: targetNotes || undefined,
+      });
+      setTargetStatus(result.deduplicated ? "Target already exists." : "Target added.");
+    } catch (error) {
+      setTargetError(error instanceof Error ? error.message : "Failed to add target.");
+    }
+  };
+
+  const handleRunImpactAnalysis = async () => {
+    setAnalysisStatus("Running impact analysis...");
+    try {
+      const result = await runImpactAnalysis({ changeNoticeId: notice._id as never });
+      setAnalysisStatus(
+        `Impact analysis complete. Created ${result.created} suggestion(s), skipped ${result.skippedDuplicates}.`,
+      );
+    } catch (error) {
+      setAnalysisStatus(error instanceof Error ? error.message : "Impact analysis failed.");
+    }
+  };
+
+  const handleAcceptFollowUp = async (suggestionId: unknown) => {
+    try {
+      const result = await acceptFollowUp({ suggestionId: suggestionId as never });
+      setAnalysisStatus(`Created follow-up ECN ${result.id}.`);
+    } catch (error) {
+      setAnalysisStatus(error instanceof Error ? error.message : "Failed to create follow-up ECN.");
+    }
+  };
+
+  const handlePdmImport = async (mode: "preview" | "upsert") => {
+    setPdmStatus(`${mode === "preview" ? "Previewing" : "Importing"} payload...`);
+    setPdmResult(null);
+    try {
+      const payload = JSON.parse(pdmJson) as {
+        sourceSystem: "autodesk_vault_professional" | "other";
+        externalProductId?: string;
+        product: {
+          productNumber: string;
+          drawingNumber: string;
+          revision: string;
+          name: string;
+          description?: string;
+        };
+        bomLines: Array<{
+          partNumber: string;
+          drawingNumbers?: string[];
+          revision?: string;
+          name?: string;
+          description?: string;
+          itemType: "product" | "raw material" | "service";
+          quantity: number;
+        }>;
+      };
+
+      const result = await importPdmProduct({ ...payload, mode });
+      setPdmStatus(`${mode === "preview" ? "Preview" : "Import"} complete.`);
+      setPdmResult(JSON.stringify(result, null, 2));
+    } catch (error) {
+      setPdmStatus(error instanceof Error ? error.message : "PDM payload failed.");
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            ECN Workspace
+          </p>
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+            {notice.id}
+          </h2>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{notice.description}</p>
+        </div>
+        <button
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+          onClick={onClose}
+          type="button"
+        >
+          Close Workspace
+        </button>
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <div className="space-y-5">
+          <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              Add Product To ECN
+            </h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Adds the product&apos;s item record as a target on this ECN.
+            </p>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-slate-700 dark:text-slate-200">Product</span>
+                <select
+                  className="rounded-md border border-slate-300 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
+                  value={selectedProductNumber}
+                  onChange={(e) => setSelectedProductNumber(e.target.value)}
+                >
+                  <option value="">Select product...</option>
+                  {productOptions.map(({ product }) => (
+                    <option key={String(product._id)} value={product.productNumber}>
+                      {product.productNumber} - {product.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-slate-700 dark:text-slate-200">Target role</span>
+                <select
+                  className="rounded-md border border-slate-300 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
+                  value={targetRole}
+                  onChange={(e) =>
+                    setTargetRole(e.target.value as "direct" | "impacted" | "candidate")
+                  }
+                >
+                  <option value="direct">direct</option>
+                  <option value="impacted">impacted</option>
+                  <option value="candidate">candidate</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-slate-700 dark:text-slate-200">Change type</span>
+                <select
+                  className="rounded-md border border-slate-300 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
+                  value={changeType}
+                  onChange={(e) =>
+                    setChangeType(
+                      e.target.value as "modify" | "add" | "remove" | "replace" | "review_only",
+                    )
+                  }
+                >
+                  <option value="modify">modify</option>
+                  <option value="add">add</option>
+                  <option value="remove">remove</option>
+                  <option value="replace">replace</option>
+                  <option value="review_only">review_only</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-slate-700 dark:text-slate-200">Notes (optional)</span>
+                <input
+                  className="rounded-md border border-slate-300 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
+                  value={targetNotes}
+                  onChange={(e) => setTargetNotes(e.target.value)}
+                  placeholder="Why this product is included..."
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                className="rounded-md bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900"
+                onClick={() => void handleAddProductTarget()}
+                type="button"
+              >
+                Add Product Target
+              </button>
+              <button
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                onClick={() => void handleRunImpactAnalysis()}
+                type="button"
+              >
+                Run Impact Analysis
+              </button>
+            </div>
+            {targetError && (
+              <p className="mt-2 text-sm text-red-700 dark:text-red-300">{targetError}</p>
+            )}
+            {targetStatus && (
+              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{targetStatus}</p>
+            )}
+            {analysisStatus && (
+              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{analysisStatus}</p>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Targets</h3>
+            <div className="mt-3 space-y-2 text-sm">
+              {(targets ?? []).length === 0 && (
+                <p className="text-slate-500 dark:text-slate-400">No ECN targets yet.</p>
+              )}
+              {(targets ?? []).map((target) => (
+                <div
+                  className="rounded-md border border-slate-200 p-2 dark:border-slate-800"
+                  key={String(target._id)}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{target.item?.partNumber ?? "Unknown item"}</span>
+                    <span className="rounded bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                      {target.targetRole}
+                    </span>
+                    <span className="rounded bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                      {target.changeType}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {target.item?.name ?? "Missing item"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-5">
+          <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              Impact Analysis Suggestions
+            </h3>
+            <div className="mt-3 space-y-2 text-sm">
+              {(suggestions ?? []).length === 0 && (
+                <p className="text-slate-500 dark:text-slate-400">
+                  No open suggestions. Run impact analysis after adding a direct product target.
+                </p>
+              )}
+              {(suggestions ?? []).map((suggestion) => (
+                <div
+                  className="rounded-md border border-slate-200 p-3 dark:border-slate-800"
+                  key={String(suggestion._id)}
+                >
+                  <p className="font-medium text-slate-900 dark:text-slate-100">
+                    {suggestion.suggestionType}
+                  </p>
+                  <p className="mt-1 text-slate-600 dark:text-slate-300">{suggestion.reason}</p>
+                  {(suggestion.suggestedPartNumber || suggestion.suggestedName) && (
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      {suggestion.suggestedPartNumber} {suggestion.suggestedName}
+                    </p>
+                  )}
+                  {suggestion.suggestionType === "create_follow_up_ecn" && (
+                    <button
+                      className="mt-2 rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                      onClick={() => void handleAcceptFollowUp(suggestion._id)}
+                      type="button"
+                    >
+                      Create Follow-up ECN
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              PDM Import Placeholder (Vault Push)
+            </h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Use this to simulate a middleware push from Autodesk Vault Professional into products/items.
+            </p>
+            <textarea
+              className="mt-3 min-h-64 w-full rounded-md border border-slate-300 bg-white p-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-950"
+              value={pdmJson}
+              onChange={(e) => setPdmJson(e.target.value)}
+            />
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                onClick={() => void handlePdmImport("preview")}
+                type="button"
+              >
+                Preview Payload
+              </button>
+              <button
+                className="rounded-md bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900"
+                onClick={() => void handlePdmImport("upsert")}
+                type="button"
+              >
+                Import Product + BOM
+              </button>
+            </div>
+            {pdmStatus && (
+              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{pdmStatus}</p>
+            )}
+            {pdmResult && (
+              <pre className="mt-2 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-800 dark:bg-slate-950">
+                {pdmResult}
+              </pre>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Linked ECNs</h3>
+            <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+              <p>Parent links: {links?.asParent.length ?? 0}</p>
+              <p>Child links: {links?.asChild.length ?? 0}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
@@ -369,6 +791,7 @@ function ResourceCard({
   isClickable,
   isBusy,
   onClick,
+  onOpen,
 }: {
   title: string;
   description: string;
@@ -378,6 +801,7 @@ function ResourceCard({
   isClickable: boolean;
   isBusy: boolean;
   onClick: () => void;
+  onOpen: () => void;
 }) {
   const colorByState = {
     proposed: "border-amber-300 bg-amber-50 dark:border-amber-700/70 dark:bg-amber-900/10",
@@ -411,11 +835,23 @@ function ResourceCard({
         <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
           {title}
         </p>
-        <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${stateLabelClass[state]}`}
-        >
-          {state}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-white/60 dark:border-slate-600 dark:hover:bg-slate-800"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+            type="button"
+          >
+            Open
+          </button>
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${stateLabelClass[state]}`}
+          >
+            {state}
+          </span>
+        </div>
       </div>
 
       <p className="text-sm text-slate-700 dark:text-slate-200">
@@ -436,9 +872,28 @@ function ResourceCard({
 
   if (isClickable) {
     return (
-      <button className={cardClass} disabled={isBusy} onClick={onClick} type="button">
+      <article
+        aria-disabled={isBusy}
+        className={cardClass}
+        onClick={() => {
+          if (!isBusy) {
+            onClick();
+          }
+        }}
+        onKeyDown={(e) => {
+          if (isBusy) {
+            return;
+          }
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick();
+          }
+        }}
+        role="button"
+        tabIndex={isBusy ? -1 : 0}
+      >
         {content}
-      </button>
+      </article>
     );
   }
 
