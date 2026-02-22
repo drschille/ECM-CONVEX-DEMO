@@ -27,7 +27,7 @@ function parseSequenceFromId(id: string, year: number) {
 
 async function getStoredSequence(ctx: { db: any }, year: number) {
     return await ctx.db
-        .query("changeNoticeSequences")
+        .query("changeRequestSequences")
         .withIndex("by_year", (q: any) => q.eq("year", year))
         .unique();
 }
@@ -39,8 +39,8 @@ async function getBootstrappedLastSequence(ctx: { db: any }, year: number) {
     }
 
     const noticesForYear = await ctx.db
-        .query("changeNotices")
-        .withIndex("change_notices_by_year", (q: any) => q.eq("year", year))
+        .query("changeRequests")
+        .withIndex("change_requests_by_year", (q: any) => q.eq("year", year))
         .collect();
     const maxExistingSequence = noticesForYear.reduce((max: number, notice: { id: string }) => {
         const parsed = parseSequenceFromId(notice.id, year);
@@ -74,8 +74,8 @@ async function createChangeNoticeWithNextId(
         }
 
         const existing = await ctx.db
-            .query("changeNotices")
-            .withIndex("change_notices_by_year", (q: any) =>
+            .query("changeRequests")
+            .withIndex("change_requests_by_year", (q: any) =>
                 q.eq("year", year).eq("id", id)
             )
             .unique();
@@ -89,17 +89,17 @@ async function createChangeNoticeWithNextId(
     }
 
     if (sequenceRow) {
-        await ctx.db.patch("changeNoticeSequences", sequenceRow._id, {
+        await ctx.db.patch("changeRequestSequences", sequenceRow._id, {
             lastNumber: nextNumber,
         });
     } else {
-        await ctx.db.insert("changeNoticeSequences", {
+        await ctx.db.insert("changeRequestSequences", {
             year,
             lastNumber: nextNumber,
         });
     }
 
-    const noticeId = await ctx.db.insert("changeNotices", {
+    const noticeId = await ctx.db.insert("changeRequests", {
         id,
         author: params.author,
         description: params.description ?? "",
@@ -119,8 +119,8 @@ export const changeNotices = query({
         const year = args.year ?? new Date().getFullYear();
 
         const notices = await ctx.db
-            .query("changeNotices")
-            .withIndex("change_notices_by_year", (q) =>
+            .query("changeRequests")
+            .withIndex("change_requests_by_year", (q) =>
                 q.eq("year", year)
             )
             .order("asc")
@@ -154,7 +154,7 @@ export const addChangeNotice = mutation({
 
 export const addChangeNoticeTarget = mutation({
     args: {
-        changeNoticeId: v.id("changeNotices"),
+        changeNoticeId: v.id("changeRequests"),
         itemId: v.id("items"),
         targetRole: v.union(
             v.literal("direct"),
@@ -175,7 +175,7 @@ export const addChangeNoticeTarget = mutation({
     handler: async (ctx, args) => {
         await requireUserIdentity(ctx);
 
-        const notice = await ctx.db.get("changeNotices", args.changeNoticeId);
+        const notice = await ctx.db.get("changeRequests", args.changeNoticeId);
         if (!notice) {
             throw new Error("Change notice not found");
         }
@@ -185,8 +185,8 @@ export const addChangeNoticeTarget = mutation({
         }
 
         const existingTargets = await ctx.db
-            .query("changeNoticeTargets")
-            .withIndex("by_change_notice", (q) => q.eq("changeNoticeId", args.changeNoticeId))
+            .query("changeRequestTargets")
+            .withIndex("by_change_request", (q) => q.eq("changeRequestId", args.changeNoticeId))
             .collect();
         const duplicate = existingTargets.find(
             (target) =>
@@ -198,8 +198,8 @@ export const addChangeNoticeTarget = mutation({
             return { targetId: duplicate._id, deduplicated: true };
         }
 
-        const targetId = await ctx.db.insert("changeNoticeTargets", {
-            changeNoticeId: args.changeNoticeId,
+        const targetId = await ctx.db.insert("changeRequestTargets", {
+            changeRequestId: args.changeNoticeId,
             itemId: args.itemId,
             targetRole: args.targetRole,
             changeType: args.changeType,
@@ -213,11 +213,11 @@ export const addChangeNoticeTarget = mutation({
 });
 
 export const changeNoticeTargetsForEcn = query({
-    args: { changeNoticeId: v.id("changeNotices") },
+    args: { changeNoticeId: v.id("changeRequests") },
     handler: async (ctx, args) => {
         const targets = await ctx.db
-            .query("changeNoticeTargets")
-            .withIndex("by_change_notice", (q) => q.eq("changeNoticeId", args.changeNoticeId))
+            .query("changeRequestTargets")
+            .withIndex("by_change_request", (q) => q.eq("changeRequestId", args.changeNoticeId))
             .collect();
 
         const targetsWithItems = await Promise.all(
@@ -232,16 +232,16 @@ export const changeNoticeTargetsForEcn = query({
 });
 
 export const changeNoticeLinksForEcn = query({
-    args: { changeNoticeId: v.id("changeNotices") },
+    args: { changeNoticeId: v.id("changeRequests") },
     handler: async (ctx, args) => {
         const [asParent, asChild] = await Promise.all([
             ctx.db
-                .query("changeNoticeLinks")
-                .withIndex("by_parent", (q) => q.eq("parentChangeNoticeId", args.changeNoticeId))
+                .query("changeRequestLinks")
+                .withIndex("by_parent", (q) => q.eq("parentChangeRequestId", args.changeNoticeId))
                 .collect(),
             ctx.db
-                .query("changeNoticeLinks")
-                .withIndex("by_child", (q) => q.eq("childChangeNoticeId", args.changeNoticeId))
+                .query("changeRequestLinks")
+                .withIndex("by_child", (q) => q.eq("childChangeRequestId", args.changeNoticeId))
                 .collect(),
         ]);
 
@@ -251,7 +251,7 @@ export const changeNoticeLinksForEcn = query({
 
 export const impactAnalysisSuggestionsForEcn = query({
     args: {
-        changeNoticeId: v.id("changeNotices"),
+        changeNoticeId: v.id("changeRequests"),
         status: v.optional(
             v.union(
                 v.literal("open"),
@@ -264,33 +264,33 @@ export const impactAnalysisSuggestionsForEcn = query({
     handler: async (ctx, args) => {
         const status = args.status ?? "open";
         return await ctx.db
-            .query("impactAnalysisSuggestions")
-            .withIndex("by_change_notice", (q) =>
-                q.eq("changeNoticeId", args.changeNoticeId).eq("status", status)
+            .query("requestImpactAnalysisSuggestions")
+            .withIndex("by_change_request", (q) =>
+                q.eq("changeRequestId", args.changeNoticeId).eq("status", status)
             )
             .collect();
     },
 });
 
 export const runImpactAnalysisForEcn = mutation({
-    args: { changeNoticeId: v.id("changeNotices") },
+    args: { changeNoticeId: v.id("changeRequests") },
     handler: async (ctx, args) => {
         await requireUserIdentity(ctx);
-        const notice = await ctx.db.get("changeNotices", args.changeNoticeId);
+        const notice = await ctx.db.get("changeRequests", args.changeNoticeId);
         if (!notice) {
             throw new Error("Change notice not found");
         }
 
         const targets = await ctx.db
-            .query("changeNoticeTargets")
-            .withIndex("by_change_notice", (q) => q.eq("changeNoticeId", args.changeNoticeId))
+            .query("changeRequestTargets")
+            .withIndex("by_change_request", (q) => q.eq("changeRequestId", args.changeNoticeId))
             .collect();
         const targetedItemIds = new Set(targets.map((target) => String(target.itemId)));
 
         const openSuggestions = await ctx.db
-            .query("impactAnalysisSuggestions")
-            .withIndex("by_change_notice", (q) =>
-                q.eq("changeNoticeId", args.changeNoticeId).eq("status", "open")
+            .query("requestImpactAnalysisSuggestions")
+            .withIndex("by_change_request", (q) =>
+                q.eq("changeRequestId", args.changeNoticeId).eq("status", "open")
             )
             .collect();
         const openSuggestionKeys = new Set(
@@ -335,8 +335,8 @@ export const runImpactAnalysisForEcn = mutation({
             if (!productRecord) {
                 const key = `create_follow_up_ecn:${String(productItem._id)}`;
                 if (!targetedItemIds.has(String(productItem._id)) && !openSuggestionKeys.has(key)) {
-                    await ctx.db.insert("impactAnalysisSuggestions", {
-                        changeNoticeId: args.changeNoticeId,
+                    await ctx.db.insert("requestImpactAnalysisSuggestions", {
+                        changeRequestId: args.changeNoticeId,
                         sourceItemId: productItem._id,
                         suggestionType: "create_follow_up_ecn",
                         suggestedItemId: productItem._id,
@@ -385,8 +385,8 @@ export const runImpactAnalysisForEcn = mutation({
                     continue;
                 }
 
-                await ctx.db.insert("impactAnalysisSuggestions", {
-                    changeNoticeId: args.changeNoticeId,
+                await ctx.db.insert("requestImpactAnalysisSuggestions", {
+                    changeRequestId: args.changeNoticeId,
                     sourceItemId: productItem._id,
                     suggestionType,
                     suggestedItemId: childItem._id,
@@ -413,12 +413,12 @@ export const runImpactAnalysisForEcn = mutation({
 
 export const acceptSuggestionCreateFollowUpEcn = mutation({
     args: {
-        suggestionId: v.id("impactAnalysisSuggestions"),
+        suggestionId: v.id("requestImpactAnalysisSuggestions"),
         description: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
         const user = await requireUserIdentity(ctx);
-        const suggestion = await ctx.db.get("impactAnalysisSuggestions", args.suggestionId);
+        const suggestion = await ctx.db.get("requestImpactAnalysisSuggestions", args.suggestionId);
         if (!suggestion) {
             throw new Error("Suggestion not found");
         }
@@ -429,7 +429,7 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
             throw new Error("Suggestion is not a follow-up ECN suggestion");
         }
 
-        const parentNotice = await ctx.db.get("changeNotices", suggestion.changeNoticeId);
+        const parentNotice = await ctx.db.get("changeRequests", suggestion.changeRequestId);
         if (!parentNotice) {
             throw new Error("Parent change notice not found");
         }
@@ -444,17 +444,17 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
             now,
         });
 
-        await ctx.db.insert("changeNoticeLinks", {
-            parentChangeNoticeId: suggestion.changeNoticeId,
-            childChangeNoticeId: created.noticeId,
+        await ctx.db.insert("changeRequestLinks", {
+            parentChangeRequestId: suggestion.changeRequestId,
+            childChangeRequestId: created.noticeId,
             reason: "follow_up_for_subassembly",
             createdAt: now,
             createdBy: user.name ?? user.email ?? "Unknown",
         });
 
         if (suggestion.suggestedItemId) {
-            await ctx.db.insert("changeNoticeTargets", {
-                changeNoticeId: created.noticeId,
+            await ctx.db.insert("changeRequestTargets", {
+                changeRequestId: created.noticeId,
                 itemId: suggestion.suggestedItemId,
                 targetRole: "direct",
                 changeType: "modify",
@@ -462,9 +462,9 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
             });
         }
 
-        await ctx.db.patch("impactAnalysisSuggestions", args.suggestionId, {
+        await ctx.db.patch("requestImpactAnalysisSuggestions", args.suggestionId, {
             status: "accepted",
-            createdChangeNoticeId: created.noticeId,
+            createdChangeRequestId: created.noticeId,
             resolvedAt: now,
             resolvedBy: user.name ?? user.email ?? "Unknown",
         });
@@ -477,11 +477,11 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
 });
 
 export const startChangeNotice = mutation({
-    args: { noticeId: v.id("changeNotices") },
+    args: { noticeId: v.id("changeRequests") },
     handler: async (ctx, args) => {
         await requireUserIdentity(ctx);
 
-        const notice = await ctx.db.get("changeNotices", args.noticeId);
+        const notice = await ctx.db.get("changeRequests", args.noticeId);
         if (!notice) {
             throw new Error("Change notice not found");
         }
@@ -489,6 +489,6 @@ export const startChangeNotice = mutation({
             throw new Error("Only proposed change notices can be started");
         }
 
-        await ctx.db.patch("changeNotices", args.noticeId, { state: "started" });
+        await ctx.db.patch("changeRequests", args.noticeId, { state: "started" });
     },
 });

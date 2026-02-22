@@ -16,16 +16,29 @@ export default defineSchema({
     state: v.union(
       v.literal("proposed"),
       v.literal("started"),
-      v.literal("completed"), 
-      v.literal("cancelled")
-    )
+      v.literal("completed"),
+      v.literal("cancelled"),
+    ),
   }).index("change_notices_by_year", ["year", "id", "timestamp"]),
-  changeNoticeSequences: defineTable({
+  changeRequests: defineTable({
+    id: v.string(),
+    author: v.string(),
+    description: v.string(),
+    timestamp: v.number(),
+    year: v.number(),
+    state: v.union(
+      v.literal("proposed"),
+      v.literal("started"),
+      v.literal("completed"),
+      v.literal("cancelled"),
+    ),
+  }).index("change_requests_by_year", ["year", "id", "timestamp"]),
+  changeRequestSequences: defineTable({
     year: v.number(),
     lastNumber: v.number(),
   }).index("by_year", ["year"]),
-  changeNoticeTargets: defineTable({
-    changeNoticeId: v.id("changeNotices"),
+  changeRequestTargets: defineTable({
+    changeRequestId: v.id("changeRequests"),
     itemId: v.id("items"),
     targetRole: v.union(
       v.literal("direct"),
@@ -43,12 +56,12 @@ export default defineSchema({
     plannedRevisionFrom: v.optional(v.string()),
     plannedRevisionTo: v.optional(v.string()),
   })
-    .index("by_change_notice", ["changeNoticeId"])
+    .index("by_change_request", ["changeRequestId"])
     .index("by_item", ["itemId"])
-    .index("by_change_notice_role", ["changeNoticeId", "targetRole"]),
-  changeNoticeLinks: defineTable({
-    parentChangeNoticeId: v.id("changeNotices"),
-    childChangeNoticeId: v.id("changeNotices"),
+    .index("by_change_request_role", ["changeRequestId", "targetRole"]),
+  changeRequestLinks: defineTable({
+    parentChangeRequestId: v.id("changeRequests"),
+    childChangeRequestId: v.id("changeRequests"),
     reason: v.union(
       v.literal("depends_on"),
       v.literal("derived_from"),
@@ -60,10 +73,10 @@ export default defineSchema({
     createdBy: v.optional(v.string()),
     notes: v.optional(v.string()),
   })
-    .index("by_parent", ["parentChangeNoticeId"])
-    .index("by_child", ["childChangeNoticeId"]),
-  impactAnalysisSuggestions: defineTable({
-    changeNoticeId: v.id("changeNotices"),
+    .index("by_parent", ["parentChangeRequestId"])
+    .index("by_child", ["childChangeRequestId"]),
+  requestImpactAnalysisSuggestions: defineTable({
+    changeRequestId: v.id("changeRequests"),
     sourceItemId: v.optional(v.id("items")),
     suggestionType: v.union(
       v.literal("create_follow_up_ecn"),
@@ -82,14 +95,14 @@ export default defineSchema({
       v.literal("dismissed"),
       v.literal("superseded"),
     ),
-    createdChangeNoticeId: v.optional(v.id("changeNotices")),
+    createdChangeRequestId: v.optional(v.id("changeRequests")),
     createdAt: v.number(),
     resolvedAt: v.optional(v.number()),
     resolvedBy: v.optional(v.string()),
   })
-    .index("by_change_notice", ["changeNoticeId", "status"])
+    .index("by_change_request", ["changeRequestId", "status"])
     .index("by_source_item", ["sourceItemId"])
-    .index("by_created_change_notice", ["createdChangeNoticeId"]),
+    .index("by_created_change_request", ["createdChangeRequestId"]),
   products: defineTable({
     productNumber: v.string(),
     drawingNumber: v.string(),
