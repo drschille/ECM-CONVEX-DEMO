@@ -144,11 +144,19 @@ function Content() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [startingNoticeId, setStartingNoticeId] = useState<string | null>(null);
+  const [activeLane, setActiveLane] = useState<"requests" | "notifications">("requests");
   const [selectedNoticeId, setSelectedNoticeId] = useState<string | null>(null);
 
   const proposedCount = notices.filter((notice) => notice.state === "proposed").length;
   const startedCount = notices.filter((notice) => notice.state === "started").length;
   const completedCount = notices.filter((notice) => notice.state === "completed").length;
+  const requestNotices = notices.filter(
+    (notice) => notice.state === "proposed" || notice.state === "started",
+  );
+  const notificationNotices = notices.filter(
+    (notice) => notice.state === "completed" || notice.state === "cancelled",
+  );
+  const visibleNotices = activeLane === "requests" ? requestNotices : notificationNotices;
   const selectedNotice = notices.find((notice) => String(notice._id) === selectedNoticeId) ?? null;
 
   const openCreateModal = () => {
@@ -212,62 +220,107 @@ function Content() {
 
   return (
     <>
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
-              Change Notices
+      <div className="lg:grid lg:grid-cols-[15rem_minmax(20rem,33vw)_1fr] lg:gap-4">
+        <aside
+          className={`${selectedNotice ? "hidden" : "block"} rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:block`}
+        >
+          <div className="mb-4">
+            <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+              Change Control
             </h1>
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-              Manage engineering change notices for the current year.
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Browse requests and notifications.
             </p>
           </div>
-          <button
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
-            onClick={openCreateModal}
-            type="button"
-          >
-            New Change Notice
-          </button>
-        </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <StatTile label="Total" value={String(notices.length)} />
-          <StatTile label="Proposed" value={String(proposedCount)} />
-          <StatTile label="Started" value={String(startedCount)} />
-          <StatTile label="Completed" value={String(completedCount)} />
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {notices.length === 0 && (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-            No change notices yet. Create the first one to get started.
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
+            <NavRailButton
+              active={activeLane === "requests"}
+              count={requestNotices.length}
+              icon="requests"
+              title="Requests"
+              onClick={() => setActiveLane("requests")}
+            />
+            <NavRailButton
+              active={activeLane === "notifications"}
+              count={notificationNotices.length}
+              icon="notices"
+              title="Notices"
+              onClick={() => setActiveLane("notifications")}
+            />
           </div>
-        )}
 
-        {notices.map((notice) => (
-          <ResourceCard
-            key={notice._id}
-            title={notice.id}
-            description={notice.description}
-            state={notice.state}
-            author={notice.author}
-            timestamp={notice.timestamp}
-            isClickable={notice.state === "proposed"}
-            isBusy={startingNoticeId === String(notice._id)}
-            onClick={() => void handleCardClick(notice)}
-            onOpen={() => setSelectedNoticeId(String(notice._id))}
-          />
-        ))}
-      </section>
+          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-1">
+            <StatTile label="Proposed" value={String(proposedCount)} />
+            <StatTile label="Started" value={String(startedCount)} />
+            <StatTile label="Completed" value={String(completedCount)} />
+            <StatTile label="Total" value={String(notices.length)} />
+          </div>
+        </aside>
 
-      {selectedNotice && (
-        <EcnWorkspace
-          notice={selectedNotice}
-          onClose={() => setSelectedNoticeId(null)}
-        />
-      )}
+        <section
+          className={`${selectedNotice ? "hidden" : "block"} mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:mt-0`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                {activeLane === "requests" ? "Change Requests" : "Change Notifications"}
+              </h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                {activeLane === "requests"
+                  ? "Proposed or in-progress engineering work"
+                  : "Completed or closed engineering work"}
+              </p>
+            </div>
+            <button
+              className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
+              onClick={openCreateModal}
+              type="button"
+            >
+              New ECN
+            </button>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {visibleNotices.length === 0 && (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                No {activeLane === "requests" ? "change requests" : "change notifications"} yet.
+              </div>
+            )}
+
+            {visibleNotices.map((notice) => (
+              <ResourceCard
+                key={notice._id}
+                title={notice.id}
+                description={notice.description}
+                state={notice.state}
+                author={notice.author}
+                timestamp={notice.timestamp}
+                isClickable={notice.state === "proposed"}
+                isBusy={startingNoticeId === String(notice._id)}
+                isSelected={selectedNoticeId === String(notice._id)}
+                onClick={() => void handleCardClick(notice)}
+                onOpen={() => setSelectedNoticeId(String(notice._id))}
+              />
+            ))}
+          </div>
+        </section>
+
+        <section
+          className={`${selectedNotice ? "block" : "hidden"} mt-4 lg:mt-0 lg:block`}
+        >
+          {selectedNotice ? (
+            <EcnWorkspace
+              notice={selectedNotice}
+              onClose={() => setSelectedNoticeId(null)}
+            />
+          ) : (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+              Select an ECN from the list to open its workspace.
+            </div>
+          )}
+        </section>
+      </div>
 
       {isCreateOpen && (
         <div
@@ -354,6 +407,84 @@ function Content() {
         </div>
       )}
     </>
+  );
+}
+
+function NavRailButton({
+  active,
+  count,
+  icon,
+  title,
+  onClick,
+}: {
+  active: boolean;
+  count: number;
+  icon: "requests" | "notices";
+  title: string;
+  onClick: () => void;
+}) {
+  const iconSvg =
+    icon === "requests" ? (
+      <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+        <path
+          d="M8 7h8M8 12h8M8 17h5M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ) : (
+      <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+        <path
+          d="M7 8a5 5 0 1 1 10 0v5l2 2H5l2-2V8Zm3 10a2 2 0 0 0 4 0"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+
+  return (
+    <button
+      className={[
+        "rounded-xl border p-3 text-left transition",
+        active
+          ? "border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900"
+          : "border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-800",
+      ].join(" ")}
+      onClick={onClick}
+      type="button"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span
+            className={[
+              "inline-flex h-8 w-8 items-center justify-center rounded-lg border",
+              active
+                ? "border-white/20 bg-white/10 dark:border-slate-900/15 dark:bg-slate-900/10"
+                : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900",
+            ].join(" ")}
+          >
+            {iconSvg}
+          </span>
+          <div>
+            <p className="text-sm font-semibold leading-none">{title}</p>
+          </div>
+        </div>
+        <span
+          className={[
+            "rounded-full px-2 py-0.5 text-xs",
+            active
+              ? "bg-white/20 text-white dark:bg-slate-900/10 dark:text-slate-900"
+              : "bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+          ].join(" ")}
+        >
+          {count}
+        </span>
+      </div>
+    </button>
   );
 }
 
@@ -790,6 +921,7 @@ function ResourceCard({
   timestamp,
   isClickable,
   isBusy,
+  isSelected,
   onClick,
   onOpen,
 }: {
@@ -800,6 +932,7 @@ function ResourceCard({
   timestamp: number;
   isClickable: boolean;
   isBusy: boolean;
+  isSelected: boolean;
   onClick: () => void;
   onOpen: () => void;
 }) {
@@ -821,6 +954,7 @@ function ResourceCard({
   const cardClass = [
     "flex h-full w-full flex-col gap-3 rounded-xl border p-4 text-left shadow-sm transition",
     colorByState[state],
+    isSelected ? "ring-2 ring-slate-400 dark:ring-slate-500" : "",
     isClickable
       ? "cursor-pointer hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500"
       : "cursor-default",
