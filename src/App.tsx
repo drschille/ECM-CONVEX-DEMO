@@ -18,7 +18,7 @@ export default function App() {
   return (
     <>
       <header className="sticky top-0 z-10 border-b border-slate-200/80 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex w-full max-w-[1800px] items-center justify-between px-4 py-3">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
               ECM Demo
@@ -30,7 +30,7 @@ export default function App() {
           <SignOutButton />
         </div>
       </header>
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-8">
+      <main className="mx-auto flex w-full max-w-[1800px] flex-col gap-8 px-4 py-8">
         <Authenticated>
           <Content />
         </Authenticated>
@@ -347,7 +347,7 @@ function Content() {
         </aside>
 
         <section
-          className={`${selectedNotice ? "hidden" : "block"} mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:mt-0`}
+          className={`${selectedNotice ? "hidden" : "block"} mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:mt-0 lg:block`}
         >
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -427,7 +427,7 @@ function Content() {
         </section>
 
         <section
-          className={`${selectedNotice ? "block" : "hidden"} mt-4 lg:mt-0 lg:block`}
+          className={`${selectedNotice ? "block" : "hidden"} mt-4 min-w-0 lg:mt-0 lg:block`}
         >
           {selectedNotice ? (
             <EcnWorkspace
