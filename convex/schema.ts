@@ -45,6 +45,15 @@ export default defineSchema({
     year: v.number(),
     lastNumber: v.number(),
   }).index("by_year", ["year"]),
+  sequencePrefixSettings: defineTable({
+    sequenceType: v.union(
+      v.literal("changeRequest"),
+      v.literal("changeNotification"),
+    ),
+    prefix: v.string(),
+    updatedAt: v.number(),
+    updatedBy: v.string(),
+  }).index("by_sequence_type", ["sequenceType"]),
   changeRequestTargets: defineTable({
     changeRequestId: v.id("changeRequests"),
     itemId: v.id("items"),

@@ -2,28 +2,49 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 
-function formatSuggestedChangeNoticeId(year: number, sequence: number) {
-    return `P${year}-${String(sequence).padStart(4, "0")}`;
+type SequencePrefixType = "changeRequest" | "changeNotification";
+
+const DEFAULT_SEQUENCE_PREFIXES: Record<SequencePrefixType, string> = {
+    changeRequest: "P",
+    changeNotification: "P",
+};
+
+function normalizeSequencePrefix(prefix: string) {
+    const normalized = prefix.trim().toUpperCase();
+    if (!/^[A-Z]{1,6}$/.test(normalized)) {
+        throw new Error("Prefix must be 1-6 letters (A-Z).");
+    }
+    return normalized;
+}
+
+function formatSuggestedChangeNoticeId(prefix: string, year: number, sequence: number) {
+    return `${prefix}${year}-${String(sequence).padStart(4, "0")}`;
 }
 
 function parseSequenceFromId(id: string, year: number) {
-    const dashedPrefix = `P${year}-`;
-    const legacyPrefix = `P${year}`;
-    let suffix = "";
-
-    if (id.startsWith(dashedPrefix)) {
-        suffix = id.slice(dashedPrefix.length);
-    } else if (id.startsWith(legacyPrefix)) {
-        // Backward-compatible parsing for older IDs like P20260001.
-        suffix = id.slice(legacyPrefix.length);
-    } else {
+    const match = id.match(/^([A-Z]{1,6})(\d{4})-?(\d{1,4})$/);
+    if (!match) {
         return null;
     }
-
-    if (!/^\d{1,4}$/.test(suffix)) {
+    if (Number(match[2]) !== year) {
         return null;
     }
-    return Number(suffix);
+    return Number(match[3]);
+}
+
+async function getSequencePrefixRow(
+    ctx: { db: any },
+    sequenceType: SequencePrefixType,
+) {
+    return await ctx.db
+        .query("sequencePrefixSettings")
+        .withIndex("by_sequence_type", (q: any) => q.eq("sequenceType", sequenceType))
+        .unique();
+}
+
+async function getSequencePrefix(ctx: { db: any }, sequenceType: SequencePrefixType) {
+    const row = await getSequencePrefixRow(ctx, sequenceType);
+    return row?.prefix ?? DEFAULT_SEQUENCE_PREFIXES[sequenceType];
 }
 
 async function getStoredSequence(ctx: { db: any }, year: number) {
@@ -115,9 +136,10 @@ async function createChangeNoticeWithNextId(
 ) {
     const now = params.now ?? Date.now();
     const year = new Date(now).getFullYear();
+    const prefix = await getSequencePrefix(ctx, "changeRequest");
     const { row: sequenceRow, lastNumber } = await getBootstrappedLastSequence(ctx, year);
     let nextNumber = lastNumber + 1;
-    let id = formatSuggestedChangeNoticeId(year, nextNumber);
+    let id = formatSuggestedChangeNoticeId(prefix, year, nextNumber);
 
     while (true) {
         if (nextNumber > 9999) {
@@ -136,7 +158,7 @@ async function createChangeNoticeWithNextId(
 
         // Recover from an out-of-sync sequence row by advancing forward only.
         nextNumber += 1;
-        id = formatSuggestedChangeNoticeId(year, nextNumber);
+        id = formatSuggestedChangeNoticeId(prefix, year, nextNumber);
     }
 
     if (sequenceRow) {
@@ -170,9 +192,10 @@ async function createChangeNotificationWithNextId(
 ) {
     const now = params.now ?? Date.now();
     const year = new Date(now).getFullYear();
+    const prefix = await getSequencePrefix(ctx, "changeNotification");
     const { row: sequenceRow, lastNumber } = await getBootstrappedLastNoticeSequence(ctx, year);
     let nextNumber = lastNumber + 1;
-    let id = formatSuggestedChangeNoticeId(year, nextNumber);
+    let id = formatSuggestedChangeNoticeId(prefix, year, nextNumber);
 
     while (true) {
         if (nextNumber > 9999) {
@@ -190,7 +213,7 @@ async function createChangeNotificationWithNextId(
         }
 
         nextNumber += 1;
-        id = formatSuggestedChangeNoticeId(year, nextNumber);
+        id = formatSuggestedChangeNoticeId(prefix, year, nextNumber);
     }
 
     if (sequenceRow) {
@@ -240,8 +263,9 @@ export const nextChangeNoticeId = query({
     args: { year: v.optional(v.number()) },
     handler: async (ctx, args) => {
         const year = args.year ?? new Date().getFullYear();
+        const prefix = await getSequencePrefix(ctx, "changeRequest");
         const { lastNumber } = await getBootstrappedLastSequence(ctx, year);
-        return formatSuggestedChangeNoticeId(year, lastNumber + 1);
+        return formatSuggestedChangeNoticeId(prefix, year, lastNumber + 1);
     },
 });
 
@@ -261,8 +285,55 @@ export const nextChangeNotificationId = query({
     args: { year: v.optional(v.number()) },
     handler: async (ctx, args) => {
         const year = args.year ?? new Date().getFullYear();
+        const prefix = await getSequencePrefix(ctx, "changeNotification");
         const { lastNumber } = await getBootstrappedLastNoticeSequence(ctx, year);
-        return formatSuggestedChangeNoticeId(year, lastNumber + 1);
+        return formatSuggestedChangeNoticeId(prefix, year, lastNumber + 1);
+    },
+});
+
+export const sequencePrefixSettings = query({
+    args: {},
+    handler: async (ctx) => {
+        const [changeRequest, changeNotification] = await Promise.all([
+            getSequencePrefix(ctx, "changeRequest"),
+            getSequencePrefix(ctx, "changeNotification"),
+        ]);
+        return {
+            changeRequest,
+            changeNotification,
+            defaults: DEFAULT_SEQUENCE_PREFIXES,
+        };
+    },
+});
+
+export const updateSequencePrefix = mutation({
+    args: {
+        sequenceType: v.union(v.literal("changeRequest"), v.literal("changeNotification")),
+        prefix: v.string(),
+    },
+    handler: async (ctx, args) => {
+        const identity = await requireUserIdentity(ctx);
+        const normalizedPrefix = normalizeSequencePrefix(args.prefix);
+        const row = await getSequencePrefixRow(ctx, args.sequenceType);
+        const updatedAt = Date.now();
+        const updatedBy = identity.email ?? identity.name ?? identity.subject ?? "unknown";
+
+        if (row) {
+            await ctx.db.patch("sequencePrefixSettings", row._id, {
+                prefix: normalizedPrefix,
+                updatedAt,
+                updatedBy,
+            });
+        } else {
+            await ctx.db.insert("sequencePrefixSettings", {
+                sequenceType: args.sequenceType,
+                prefix: normalizedPrefix,
+                updatedAt,
+                updatedBy,
+            });
+        }
+
+        return { sequenceType: args.sequenceType, prefix: normalizedPrefix };
     },
 });
 
