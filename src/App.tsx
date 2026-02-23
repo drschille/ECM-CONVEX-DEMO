@@ -395,7 +395,7 @@ function Content() {
         <section
           className={`${
             selectedNotice ? "hidden" : "block"
-          } mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:mt-0 lg:h-[calc(100vh-12rem)] lg:min-h-0 lg:flex lg:flex-col ${
+          } mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:mt-0 lg:h-[calc(100vh-12rem)] lg:min-h-0 lg:flex lg:flex-col lg:overflow-hidden ${
             isWorkspaceFocusMode && selectedNotice ? "lg:hidden" : ""
           }`}
         >
@@ -419,8 +419,8 @@ function Content() {
             </button>
           </div>
 
-          <div className="mt-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-            <div className="sticky top-0 z-10 -mx-4 border-y border-slate-200/80 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/95">
+          <div className="mt-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overflow-x-hidden">
+            <div className="sticky top-0 z-10 border-y border-slate-200/80 bg-white/95 py-3 backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/95">
               <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                 <StatTile label="Proposed" value={String(proposedCount)} />
                 <StatTile label="Started" value={String(startedCount)} />
@@ -431,7 +431,7 @@ function Content() {
                 />
               </div>
 
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <label className="sr-only" htmlFor="notice-list-search">
                   Search list
                 </label>
@@ -1282,11 +1282,11 @@ function EcnWorkspace({
 
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+    <div className="flex h-full min-h-[5.5rem] flex-col rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
       <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
         {label}
       </p>
-      <p className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
+      <p className="mt-auto pt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">
         {value}
       </p>
     </div>
