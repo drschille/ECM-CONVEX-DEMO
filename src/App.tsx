@@ -154,6 +154,8 @@ function Content() {
   const [selectedNoticeId, setSelectedNoticeId] = useState<string | null>(null);
   const [selectedWorkspaceKind, setSelectedWorkspaceKind] = useState<"ecr" | "ecn" | null>(null);
   const [isWorkspaceFocusMode, setIsWorkspaceFocusMode] = useState(false);
+  const [listSearch, setListSearch] = useState("");
+  const [listStateFilter, setListStateFilter] = useState<"all" | ChangeNoticeState>("all");
   const [activePage, setActivePage] = useState<"workbench" | "setup">("workbench");
   const [prefixDrafts, setPrefixDrafts] = useState<Record<SequencePrefixType, string>>({
     changeRequest: "",
@@ -170,6 +172,23 @@ function Content() {
   const startedCount = visibleNotices.filter((notice) => notice.state === "started").length;
   const completedCount = visibleNotices.filter((notice) => notice.state === "completed").length;
   const totalCount = visibleNotices.length;
+  const normalizedListSearch = listSearch.trim().toLowerCase();
+  const filteredVisibleNotices = visibleNotices.filter((notice) => {
+    const matchesState = listStateFilter === "all" || notice.state === listStateFilter;
+    if (!matchesState) {
+      return false;
+    }
+    if (!normalizedListSearch) {
+      return true;
+    }
+    const authorText = `${notice.authorName ?? ""} ${notice.authorEmail ?? ""} ${notice.author ?? ""}`
+      .toLowerCase();
+    return (
+      notice.id.toLowerCase().includes(normalizedListSearch) ||
+      (notice.description ?? "").toLowerCase().includes(normalizedListSearch) ||
+      authorText.includes(normalizedListSearch)
+    );
+  });
   const selectedRequest =
     requests.find((notice) => String(notice._id) === selectedNoticeId) ?? null;
   const selectedNotification =
@@ -335,7 +354,7 @@ function Content() {
         className={
           isWorkspaceFocusMode && selectedNotice
             ? "lg:grid lg:grid-cols-1 lg:gap-4"
-            : "lg:grid lg:grid-cols-[15rem_minmax(20rem,33vw)_1fr] lg:gap-4"
+            : "lg:grid lg:grid-cols-[15rem_minmax(20rem,28rem)_1fr] lg:gap-4"
         }
       >
         <aside
@@ -376,7 +395,7 @@ function Content() {
         <section
           className={`${
             selectedNotice ? "hidden" : "block"
-          } mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:mt-0 lg:block ${
+          } mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:mt-0 lg:h-[calc(100vh-12rem)] lg:min-h-0 lg:flex lg:flex-col ${
             isWorkspaceFocusMode && selectedNotice ? "lg:hidden" : ""
           }`}
         >
@@ -400,27 +419,60 @@ function Content() {
             </button>
           </div>
 
-          <div className="sticky top-20 z-10 -mx-4 mt-4 border-y border-slate-200/80 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/95">
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-              <StatTile label="Proposed" value={String(proposedCount)} />
-              <StatTile label="Started" value={String(startedCount)} />
-              <StatTile label="Completed" value={String(completedCount)} />
-              <StatTile
-                label={activeLane === "requests" ? "Total Requests" : "Total Notices"}
-                value={String(totalCount)}
-              />
-            </div>
-          </div>
+          <div className="mt-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+            <div className="sticky top-0 z-10 -mx-4 border-y border-slate-200/80 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/95">
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                <StatTile label="Proposed" value={String(proposedCount)} />
+                <StatTile label="Started" value={String(startedCount)} />
+                <StatTile label="Completed" value={String(completedCount)} />
+                <StatTile
+                  label={activeLane === "requests" ? "Total Requests" : "Total Notices"}
+                  value={String(totalCount)}
+                />
+              </div>
 
-          <div className="mt-4 space-y-3">
-            {visibleNotices.length === 0 && (
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+                <label className="sr-only" htmlFor="notice-list-search">
+                  Search list
+                </label>
+                <input
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  id="notice-list-search"
+                  onChange={(e) => setListSearch(e.target.value)}
+                  placeholder={`Search ${activeLane === "requests" ? "requests" : "notices"}...`}
+                  value={listSearch}
+                />
+                <select
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  onChange={(e) =>
+                    setListStateFilter(e.target.value as "all" | ChangeNoticeState)
+                  }
+                  value={listStateFilter}
+                >
+                  <option value="all">All states</option>
+                  <option value="proposed">Proposed</option>
+                  <option value="started">Started</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                Showing {filteredVisibleNotices.length} of {visibleNotices.length}
+              </p>
+            </div>
+
+            <div className="mt-3 space-y-2.5">
+            {filteredVisibleNotices.length === 0 && (
               <div className="rounded-xl border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                No {activeLane === "requests" ? "change requests" : "change notifications"} yet.
+                {visibleNotices.length === 0
+                  ? `No ${activeLane === "requests" ? "change requests" : "change notifications"} yet.`
+                  : "No results match the current filters."}
               </div>
             )}
 
             {activeLane === "requests" &&
-              requestNotices.map((notice) => (
+              filteredVisibleNotices.map((notice) => (
                 <ResourceCard
                   key={notice._id}
                   title={notice.id}
@@ -440,7 +492,7 @@ function Content() {
               ))}
 
             {activeLane === "notifications" &&
-              notificationNotices.map((notice) => (
+              filteredVisibleNotices.map((notice) => (
                 <ResourceCard
                   key={notice._id}
                   title={notice.id}
@@ -458,6 +510,7 @@ function Content() {
                   onOpen={() => openWorkspaceForCard(String(notice._id), "ecn")}
                 />
               ))}
+            </div>
           </div>
         </section>
 
@@ -1433,7 +1486,7 @@ function ResourceCard({
     author.includes("|") && !author.includes("@") ? "Unknown (no name/email)" : author;
 
   const cardClass = [
-    "flex h-full w-full flex-col gap-3 rounded-xl border p-4 text-left shadow-sm transition",
+    "flex h-full w-full flex-col gap-2 rounded-lg border p-3 text-left shadow-sm transition",
     colorByState[state],
     isSelected ? "ring-2 ring-slate-400 dark:ring-slate-500" : "",
     isClickable
@@ -1446,11 +1499,11 @@ function ResourceCard({
 
   const content = (
     <>
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+      <div className="grid grid-cols-[1fr_auto] items-start gap-2">
+        <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
           {title}
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {canOpenWorkspace && (
             <button
               className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-white/60 dark:border-slate-600 dark:hover:bg-slate-800"
@@ -1471,15 +1524,23 @@ function ResourceCard({
         </div>
       </div>
 
-      <p className="text-sm text-slate-700 dark:text-slate-200">
+      <p className="text-xs leading-5 text-slate-700 dark:text-slate-200">
         {description || "No description provided."}
       </p>
 
-      <div className="mt-auto flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
-        <p>Created: {new Date(timestamp).toLocaleString()}</p>
-        <p>Author: {authorDisplay}</p>
+      <div className="mt-auto grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
+        <p className="truncate">
+          <span className="text-slate-500 dark:text-slate-400">Author:</span> {authorDisplay}
+        </p>
+        <p className="truncate text-right">
+          <span className="text-slate-500 dark:text-slate-400">State:</span> {state}
+        </p>
+        <p className="col-span-2 truncate">
+          <span className="text-slate-500 dark:text-slate-400">Created:</span>{" "}
+          {new Date(timestamp).toLocaleString()}
+        </p>
         {isClickable && (
-          <p className="font-medium text-slate-700 dark:text-slate-200">
+          <p className="col-span-2 font-medium text-slate-700 dark:text-slate-200">
             {isBusy ? "Updating..." : "Click to open workspace"}
           </p>
         )}
