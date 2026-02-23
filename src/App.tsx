@@ -161,12 +161,13 @@ function Content() {
   const [prefixError, setPrefixError] = useState<string | null>(null);
   const [prefixStatus, setPrefixStatus] = useState<string | null>(null);
 
-  const proposedCount = requests.filter((notice) => notice.state === "proposed").length;
-  const startedCount = requests.filter((notice) => notice.state === "started").length;
-  const completedCount = requests.filter((notice) => notice.state === "completed").length;
   const requestNotices = requests;
   const notificationNotices = notifications;
   const visibleNotices = activeLane === "requests" ? requestNotices : notificationNotices;
+  const proposedCount = visibleNotices.filter((notice) => notice.state === "proposed").length;
+  const startedCount = visibleNotices.filter((notice) => notice.state === "started").length;
+  const completedCount = visibleNotices.filter((notice) => notice.state === "completed").length;
+  const totalCount = visibleNotices.length;
   const selectedNotice =
     requests.find((notice) => String(notice._id) === selectedNoticeId) ?? null;
 
@@ -343,12 +344,6 @@ function Content() {
             />
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-1">
-            <StatTile label="Proposed" value={String(proposedCount)} />
-            <StatTile label="Started" value={String(startedCount)} />
-            <StatTile label="Completed" value={String(completedCount)} />
-            <StatTile label="Total" value={String(requests.length + notifications.length)} />
-          </div>
         </aside>
 
         <section
@@ -372,6 +367,18 @@ function Content() {
             >
               {activeLane === "requests" ? "New Request" : "New Notice"}
             </button>
+          </div>
+
+          <div className="sticky top-20 z-10 -mx-4 mt-4 border-y border-slate-200/80 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/95">
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <StatTile label="Proposed" value={String(proposedCount)} />
+              <StatTile label="Started" value={String(startedCount)} />
+              <StatTile label="Completed" value={String(completedCount)} />
+              <StatTile
+                label={activeLane === "requests" ? "Total Requests" : "Total Notices"}
+                value={String(totalCount)}
+              />
+            </div>
           </div>
 
           <div className="mt-4 space-y-3">
