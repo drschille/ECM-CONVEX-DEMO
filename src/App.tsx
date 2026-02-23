@@ -13,6 +13,40 @@ import { api } from "../convex/_generated/api";
 
 type ChangeNoticeState = "proposed" | "started" | "completed" | "cancelled";
 type SequencePrefixType = "changeRequest" | "changeNotification";
+type EcnWorkGroup = {
+  id: string;
+  name: string;
+  owner: string;
+  defaultTemplateId: string;
+};
+type EcnTaskRouteTemplate = {
+  id: string;
+  name: string;
+  tasks: string[];
+};
+type EcnRoutingRow = {
+  id: string;
+  itemId: string;
+  partNumber: string;
+  name: string;
+  itemType: "product" | "raw material" | "service";
+};
+type EcnWorkGroupAssignment = {
+  required: boolean;
+  templateId: string;
+  tasks: string[];
+};
+
+function makeLocalId(prefix: string) {
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function parseTaskListInput(value: string) {
+  return value
+    .split(/[,;\n]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
 
 export default function App() {
   return (
@@ -156,7 +190,9 @@ function Content() {
   const [isWorkspaceFocusMode, setIsWorkspaceFocusMode] = useState(false);
   const [listSearch, setListSearch] = useState("");
   const [listStateFilter, setListStateFilter] = useState<"all" | ChangeNoticeState>("all");
-  const [activePage, setActivePage] = useState<"workbench" | "setup">("workbench");
+  const [activePage, setActivePage] = useState<"workbench" | "workgroups" | "setup">(
+    "workbench",
+  );
   const [prefixDrafts, setPrefixDrafts] = useState<Record<SequencePrefixType, string>>({
     changeRequest: "",
     changeNotification: "",
@@ -164,6 +200,43 @@ function Content() {
   const [savingPrefixFor, setSavingPrefixFor] = useState<SequencePrefixType | null>(null);
   const [prefixError, setPrefixError] = useState<string | null>(null);
   const [prefixStatus, setPrefixStatus] = useState<string | null>(null);
+  const [ecnWorkGroups, setEcnWorkGroups] = useState<EcnWorkGroup[]>(() => [
+    {
+      id: makeLocalId("wg"),
+      name: "Design",
+      owner: "design.lead@example.com",
+      defaultTemplateId: "",
+    },
+    {
+      id: makeLocalId("wg"),
+      name: "Manufacturing",
+      owner: "mfg.owner@example.com",
+      defaultTemplateId: "",
+    },
+    {
+      id: makeLocalId("wg"),
+      name: "Quality",
+      owner: "quality.owner@example.com",
+      defaultTemplateId: "",
+    },
+  ]);
+  const [ecnTaskRouteTemplates, setEcnTaskRouteTemplates] = useState<EcnTaskRouteTemplate[]>(() => [
+    {
+      id: makeLocalId("tpl"),
+      name: "Design review route",
+      tasks: ["Review drawing", "Update BOM references", "Approve design package"],
+    },
+    {
+      id: makeLocalId("tpl"),
+      name: "MFG change route",
+      tasks: ["Review tooling impact", "Update traveler/work instructions", "Schedule pilot run"],
+    },
+    {
+      id: makeLocalId("tpl"),
+      name: "Quality validation route",
+      tasks: ["Update control plan", "Define inspection points", "Sign off validation"],
+    },
+  ]);
 
   const requestNotices = requests;
   const notificationNotices = notifications;
@@ -199,6 +272,33 @@ function Content() {
       : selectedWorkspaceKind === "ecr"
         ? selectedRequest
         : null;
+
+  const handleAddWorkGroup = () => {
+    setEcnWorkGroups((current) => [
+      ...current,
+      { id: makeLocalId("wg"), name: "New Group", owner: "", defaultTemplateId: "" },
+    ]);
+  };
+
+  const handleRemoveWorkGroup = (workGroupId: string) => {
+    setEcnWorkGroups((current) => current.filter((group) => group.id !== workGroupId));
+  };
+
+  const handleAddTaskRouteTemplate = () => {
+    setEcnTaskRouteTemplates((current) => [
+      ...current,
+      { id: makeLocalId("tpl"), name: "New route template", tasks: ["Define task"] },
+    ]);
+  };
+
+  const handleRemoveTaskRouteTemplate = (templateId: string) => {
+    setEcnTaskRouteTemplates((current) => current.filter((template) => template.id !== templateId));
+    setEcnWorkGroups((current) =>
+      current.map((group) =>
+        group.defaultTemplateId === templateId ? { ...group, defaultTemplateId: "" } : group,
+      ),
+    );
+  };
 
   useEffect(() => {
     if (!sequencePrefixes) {
@@ -317,6 +417,18 @@ function Content() {
         <button
           className={[
             "rounded-xl px-3 py-2 text-sm font-medium transition",
+            activePage === "workgroups"
+              ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+              : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800",
+          ].join(" ")}
+          onClick={() => setActivePage("workgroups")}
+          type="button"
+        >
+          Work Groups
+        </button>
+        <button
+          className={[
+            "rounded-xl px-3 py-2 text-sm font-medium transition",
             activePage === "setup"
               ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
               : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800",
@@ -347,6 +459,17 @@ function Content() {
           error={prefixError}
           status={prefixStatus}
           defaults={sequencePrefixes?.defaults ?? { changeRequest: "P", changeNotification: "P" }}
+        />
+      ) : activePage === "workgroups" ? (
+        <WorkGroupSetupPage
+          workGroups={ecnWorkGroups}
+          setWorkGroups={setEcnWorkGroups}
+          taskRouteTemplates={ecnTaskRouteTemplates}
+          setTaskRouteTemplates={setEcnTaskRouteTemplates}
+          onAddWorkGroup={handleAddWorkGroup}
+          onRemoveWorkGroup={handleRemoveWorkGroup}
+          onAddTaskRouteTemplate={handleAddTaskRouteTemplate}
+          onRemoveTaskRouteTemplate={handleRemoveTaskRouteTemplate}
         />
       ) : (
         <>
@@ -521,6 +644,8 @@ function Content() {
             <EcnWorkspace
               notice={selectedNotice}
               workspaceKind={selectedWorkspaceKind ?? "ecr"}
+              ecnWorkGroups={ecnWorkGroups}
+              ecnTaskRouteTemplates={ecnTaskRouteTemplates}
               isFocusMode={isWorkspaceFocusMode}
               onStartRequest={
                 selectedWorkspaceKind === "ecr" && selectedRequest
@@ -813,6 +938,48 @@ function EcnWorkspace({
   const [pdmResult, setPdmResult] = useState<string | null>(null);
   const [isPdmImportOpen, setIsPdmImportOpen] = useState(false);
   const workspaceLabel = workspaceKind === "ecr" ? "ECR Workspace" : "ECN Workspace";
+  const [ecnWorkGroups, setEcnWorkGroups] = useState<EcnWorkGroup[]>(() => [
+    {
+      id: makeLocalId("wg"),
+      name: "Design",
+      owner: "design.lead@example.com",
+      defaultTemplateId: "",
+    },
+    {
+      id: makeLocalId("wg"),
+      name: "Manufacturing",
+      owner: "mfg.owner@example.com",
+      defaultTemplateId: "",
+    },
+    {
+      id: makeLocalId("wg"),
+      name: "Quality",
+      owner: "quality.owner@example.com",
+      defaultTemplateId: "",
+    },
+  ]);
+  const [ecnTaskRouteTemplates, setEcnTaskRouteTemplates] = useState<EcnTaskRouteTemplate[]>(() => [
+    {
+      id: makeLocalId("tpl"),
+      name: "Design review route",
+      tasks: ["Review drawing", "Update BOM references", "Approve design package"],
+    },
+    {
+      id: makeLocalId("tpl"),
+      name: "MFG change route",
+      tasks: ["Review tooling impact", "Update traveler/work instructions", "Schedule pilot run"],
+    },
+    {
+      id: makeLocalId("tpl"),
+      name: "Quality validation route",
+      tasks: ["Update control plan", "Define inspection points", "Sign off validation"],
+    },
+  ]);
+  const [ecnRoutingRows, setEcnRoutingRows] = useState<EcnRoutingRow[]>([]);
+  const [selectedEcnRoutingItemId, setSelectedEcnRoutingItemId] = useState("");
+  const [ecnAssignments, setEcnAssignments] = useState<
+    Record<string, Record<string, EcnWorkGroupAssignment>>
+  >({});
 
   const productOptions = products
     .map((product) => {
@@ -826,6 +993,115 @@ function EcnWorkspace({
       };
     })
     .filter((entry) => entry.item);
+  const ecnAssignableItems = items
+    .slice()
+    .sort((a, b) => a.partNumber.localeCompare(b.partNumber));
+
+  const getTaskRouteTemplate = (templateId: string) =>
+    ecnTaskRouteTemplates.find((template) => template.id === templateId) ?? null;
+
+  const getEcnAssignment = (rowId: string, workGroupId: string): EcnWorkGroupAssignment =>
+    ecnAssignments[rowId]?.[workGroupId] ?? { required: false, templateId: "", tasks: [] };
+
+  const updateEcnAssignment = (
+    rowId: string,
+    workGroupId: string,
+    updater: (current: EcnWorkGroupAssignment) => EcnWorkGroupAssignment,
+  ) => {
+    setEcnAssignments((current) => {
+      const rowAssignments = current[rowId] ?? {};
+      const nextCell = updater(rowAssignments[workGroupId] ?? { required: false, templateId: "", tasks: [] });
+      return {
+        ...current,
+        [rowId]: {
+          ...rowAssignments,
+          [workGroupId]: nextCell,
+        },
+      };
+    });
+  };
+
+  const handleAddEcnRoutingRow = () => {
+    if (!selectedEcnRoutingItemId) {
+      return;
+    }
+    const item = items.find((candidate) => String(candidate._id) === selectedEcnRoutingItemId);
+    if (!item) {
+      return;
+    }
+    setEcnRoutingRows((current) => {
+      if (current.some((row) => row.itemId === selectedEcnRoutingItemId)) {
+        return current;
+      }
+      return [
+        ...current,
+        {
+          id: makeLocalId("row"),
+          itemId: String(item._id),
+          partNumber: item.partNumber,
+          name: item.name,
+          itemType: item.itemType,
+        },
+      ];
+    });
+    setSelectedEcnRoutingItemId("");
+  };
+
+  const handleRemoveEcnRoutingRow = (rowId: string) => {
+    setEcnRoutingRows((current) => current.filter((row) => row.id !== rowId));
+    setEcnAssignments((current) => {
+      const next = { ...current };
+      delete next[rowId];
+      return next;
+    });
+  };
+
+  const handleAddWorkGroup = () => {
+    setEcnWorkGroups((current) => [
+      ...current,
+      { id: makeLocalId("wg"), name: "New Group", owner: "", defaultTemplateId: "" },
+    ]);
+  };
+
+  const handleRemoveWorkGroup = (workGroupId: string) => {
+    setEcnWorkGroups((current) => current.filter((group) => group.id !== workGroupId));
+    setEcnAssignments((current) => {
+      const next: typeof current = {};
+      for (const [rowId, rowAssignments] of Object.entries(current)) {
+        const { [workGroupId]: _removed, ...rest } = rowAssignments;
+        next[rowId] = rest;
+      }
+      return next;
+    });
+  };
+
+  const handleAddTaskRouteTemplate = () => {
+    setEcnTaskRouteTemplates((current) => [
+      ...current,
+      { id: makeLocalId("tpl"), name: "New route template", tasks: ["Define task"] },
+    ]);
+  };
+
+  const handleRemoveTaskRouteTemplate = (templateId: string) => {
+    setEcnTaskRouteTemplates((current) => current.filter((template) => template.id !== templateId));
+    setEcnWorkGroups((current) =>
+      current.map((group) =>
+        group.defaultTemplateId === templateId ? { ...group, defaultTemplateId: "" } : group,
+      ),
+    );
+    setEcnAssignments((current) => {
+      const next: typeof current = {};
+      for (const [rowId, rowAssignments] of Object.entries(current)) {
+        next[rowId] = Object.fromEntries(
+          Object.entries(rowAssignments).map(([groupId, assignment]) => [
+            groupId,
+            assignment.templateId === templateId ? { ...assignment, templateId: "" } : assignment,
+          ]),
+        );
+      }
+      return next;
+    });
+  };
 
   const handleAddProductTarget = async () => {
     if (!selectedProductNumber) {
@@ -945,7 +1221,7 @@ function EcnWorkspace({
             </button>
           )}
           <button
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+            className="hidden items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800 lg:inline-flex"
             onClick={onToggleFocusMode}
             type="button"
           >
@@ -1000,12 +1276,195 @@ function EcnWorkspace({
           {!isEcrWorkspace && (
             <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                ECN Workflow
+                ECN Work Group Routing Matrix
               </h3>
-              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                Opened from the ECN card. Workflow/approval actions for ECNs should be performed
-                here.
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Assign each affected part/product to the work groups that must handle it. Tasks can
+                be templated, then adjusted per item.
               </p>
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/60 dark:bg-amber-900/10 dark:text-amber-100">
+                Prototype UI only: work groups, templates, and routing assignments are currently
+                local to this workspace view and not persisted yet.
+              </div>
+
+              <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-end">
+                <label className="flex-1 text-sm">
+                  <span className="mb-1 block text-slate-700 dark:text-slate-200">
+                    Add part/product row
+                  </span>
+                  <select
+                    className="w-full rounded-md border border-slate-300 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
+                    onChange={(e) => setSelectedEcnRoutingItemId(e.target.value)}
+                    value={selectedEcnRoutingItemId}
+                  >
+                    <option value="">Select item...</option>
+                    {ecnAssignableItems.map((item) => (
+                      <option key={String(item._id)} value={String(item._id)}>
+                        {item.partNumber} - {item.name} ({item.itemType})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="rounded-md bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900"
+                  onClick={handleAddEcnRoutingRow}
+                  type="button"
+                >
+                  Add Row
+                </button>
+              </div>
+
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-0 text-left text-xs">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 z-10 min-w-64 border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+                        Part / Product
+                      </th>
+                      {ecnWorkGroups.map((group) => (
+                        <th
+                          className="min-w-64 border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+                          key={group.id}
+                        >
+                          <div className="flex flex-col">
+                            <span>{group.name || "Unnamed group"}</span>
+                            <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">
+                              Owner: {group.owner || "Unassigned"}
+                            </span>
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ecnRoutingRows.length === 0 && (
+                      <tr>
+                        <td
+                          className="border border-slate-200 px-3 py-4 text-slate-500 dark:border-slate-800 dark:text-slate-400"
+                          colSpan={Math.max(1, ecnWorkGroups.length + 1)}
+                        >
+                          No rows yet. Add a part or product to build the routing matrix.
+                        </td>
+                      </tr>
+                    )}
+                    {ecnRoutingRows.map((row) => (
+                      <tr key={row.id}>
+                        <td className="sticky left-0 z-[1] border border-slate-200 bg-white px-3 py-2 align-top dark:border-slate-800 dark:bg-slate-900">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="font-semibold text-slate-900 dark:text-slate-100">
+                                {row.partNumber}
+                              </p>
+                              <p className="text-slate-600 dark:text-slate-300">{row.name}</p>
+                              <p className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                {row.itemType}
+                              </p>
+                            </div>
+                            <button
+                              className="rounded border border-slate-300 px-2 py-0.5 text-[11px] hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                              onClick={() => handleRemoveEcnRoutingRow(row.id)}
+                              type="button"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </td>
+                        {ecnWorkGroups.map((group) => {
+                          const assignment = getEcnAssignment(row.id, group.id);
+                          return (
+                            <td
+                              className="border border-slate-200 px-3 py-2 align-top dark:border-slate-800"
+                              key={`${row.id}-${group.id}`}
+                            >
+                              <label className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
+                                <input
+                                  checked={assignment.required}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    updateEcnAssignment(row.id, group.id, (current) => {
+                                      if (!checked) {
+                                        return { ...current, required: false };
+                                      }
+                                      if (current.templateId || current.tasks.length > 0) {
+                                        return { ...current, required: true };
+                                      }
+                                      const templateId = group.defaultTemplateId;
+                                      const template = templateId
+                                        ? getTaskRouteTemplate(templateId)
+                                        : null;
+                                      return {
+                                        required: true,
+                                        templateId: template?.id ?? "",
+                                        tasks: template?.tasks ?? [],
+                                      };
+                                    });
+                                  }}
+                                  type="checkbox"
+                                />
+                                Required
+                              </label>
+
+                              <label className="mt-2 block">
+                                <span className="mb-1 block text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                  Template
+                                </span>
+                                <select
+                                  className="w-full rounded-md border border-slate-300 bg-white p-1.5 text-xs disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950"
+                                  disabled={!assignment.required}
+                                  onChange={(e) => {
+                                    const templateId = e.target.value;
+                                    updateEcnAssignment(row.id, group.id, (current) => {
+                                      const template = getTaskRouteTemplate(templateId);
+                                      return {
+                                        ...current,
+                                        required: current.required,
+                                        templateId,
+                                        tasks: template ? [...template.tasks] : current.tasks,
+                                      };
+                                    });
+                                  }}
+                                  value={assignment.templateId}
+                                >
+                                  <option value="">None</option>
+                                  {ecnTaskRouteTemplates.map((template) => (
+                                    <option key={template.id} value={template.id}>
+                                      {template.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <label className="mt-2 block">
+                                <span className="mb-1 block text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                  Tasks (comma-separated)
+                                </span>
+                                <input
+                                  className="w-full rounded-md border border-slate-300 bg-white p-1.5 text-xs disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950"
+                                  disabled={!assignment.required}
+                                  onChange={(e) =>
+                                    updateEcnAssignment(row.id, group.id, (current) => ({
+                                      ...current,
+                                      tasks: parseTaskListInput(e.target.value),
+                                    }))
+                                  }
+                                  placeholder="e.g. Review drawing, Approve"
+                                  value={assignment.tasks.join(", ")}
+                                />
+                              </label>
+
+                              <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                                {assignment.required
+                                  ? `${assignment.tasks.length} task(s)`
+                                  : "Not required"}
+                              </p>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
           {isEcrWorkspace && (
@@ -1134,6 +1593,205 @@ function EcnWorkspace({
         </div>
 
         <div className="space-y-5">
+          {!isEcrWorkspace && (
+            <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    Work Groups
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Each work group has an owner and an optional default task route template.
+                  </p>
+                </div>
+                <button
+                  className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                  onClick={handleAddWorkGroup}
+                  type="button"
+                >
+                  Add Group
+                </button>
+              </div>
+
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-slate-800">
+                      <th className="px-2 py-2 font-medium text-slate-600 dark:text-slate-300">
+                        Work Group
+                      </th>
+                      <th className="px-2 py-2 font-medium text-slate-600 dark:text-slate-300">
+                        Owner (User)
+                      </th>
+                      <th className="px-2 py-2 font-medium text-slate-600 dark:text-slate-300">
+                        Default Route
+                      </th>
+                      <th className="px-2 py-2" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ecnWorkGroups.map((group) => (
+                      <tr className="border-b border-slate-100 dark:border-slate-900" key={group.id}>
+                        <td className="px-2 py-2 align-top">
+                          <input
+                            className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                            onChange={(e) =>
+                              setEcnWorkGroups((current) =>
+                                current.map((candidate) =>
+                                  candidate.id === group.id
+                                    ? { ...candidate, name: e.target.value }
+                                    : candidate,
+                                ),
+                              )
+                            }
+                            value={group.name}
+                          />
+                        </td>
+                        <td className="px-2 py-2 align-top">
+                          <input
+                            className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                            onChange={(e) =>
+                              setEcnWorkGroups((current) =>
+                                current.map((candidate) =>
+                                  candidate.id === group.id
+                                    ? { ...candidate, owner: e.target.value }
+                                    : candidate,
+                                ),
+                              )
+                            }
+                            placeholder="user@example.com"
+                            value={group.owner}
+                          />
+                        </td>
+                        <td className="px-2 py-2 align-top">
+                          <select
+                            className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                            onChange={(e) =>
+                              setEcnWorkGroups((current) =>
+                                current.map((candidate) =>
+                                  candidate.id === group.id
+                                    ? { ...candidate, defaultTemplateId: e.target.value }
+                                    : candidate,
+                                ),
+                              )
+                            }
+                            value={group.defaultTemplateId}
+                          >
+                            <option value="">None</option>
+                            {ecnTaskRouteTemplates.map((template) => (
+                              <option key={template.id} value={template.id}>
+                                {template.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-2 py-2 align-top text-right">
+                          <button
+                            className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                            onClick={() => handleRemoveWorkGroup(group.id)}
+                            type="button"
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {ecnWorkGroups.length === 0 && (
+                      <tr>
+                        <td
+                          className="px-2 py-4 text-sm text-slate-500 dark:text-slate-400"
+                          colSpan={4}
+                        >
+                          No work groups defined.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {!isEcrWorkspace && (
+            <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    Task Route Templates
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Reusable task sets that can be applied per item/work-group cell in the matrix.
+                  </p>
+                </div>
+                <button
+                  className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                  onClick={handleAddTaskRouteTemplate}
+                  type="button"
+                >
+                  Add Template
+                </button>
+              </div>
+
+              <div className="mt-3 space-y-3">
+                {ecnTaskRouteTemplates.map((template) => (
+                  <div
+                    className="rounded-lg border border-slate-200 p-3 dark:border-slate-800"
+                    key={template.id}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <input
+                        className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm font-medium dark:border-slate-700 dark:bg-slate-950"
+                        onChange={(e) =>
+                          setEcnTaskRouteTemplates((current) =>
+                            current.map((candidate) =>
+                              candidate.id === template.id
+                                ? { ...candidate, name: e.target.value }
+                                : candidate,
+                            ),
+                          )
+                        }
+                        value={template.name}
+                      />
+                      <button
+                        className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                        onClick={() => handleRemoveTaskRouteTemplate(template.id)}
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <label className="mt-2 block">
+                      <span className="mb-1 block text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                        Tasks (comma, semicolon, or newline separated)
+                      </span>
+                      <textarea
+                        className="min-h-20 w-full rounded-md border border-slate-300 bg-white p-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                        onChange={(e) =>
+                          setEcnTaskRouteTemplates((current) =>
+                            current.map((candidate) =>
+                              candidate.id === template.id
+                                ? { ...candidate, tasks: parseTaskListInput(e.target.value) }
+                                : candidate,
+                            ),
+                          )
+                        }
+                        value={template.tasks.join("\n")}
+                      />
+                    </label>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      {template.tasks.length} task(s)
+                    </p>
+                  </div>
+                ))}
+                {ecnTaskRouteTemplates.length === 0 && (
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    No templates defined.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {isEcrWorkspace && (
           <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
