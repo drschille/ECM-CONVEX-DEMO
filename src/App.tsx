@@ -152,6 +152,8 @@ function Content() {
   const [startingNoticeId, setStartingNoticeId] = useState<string | null>(null);
   const [activeLane, setActiveLane] = useState<"requests" | "notifications">("requests");
   const [selectedNoticeId, setSelectedNoticeId] = useState<string | null>(null);
+  const [selectedWorkspaceKind, setSelectedWorkspaceKind] = useState<"ecr" | "ecn" | null>(null);
+  const [isWorkspaceFocusMode, setIsWorkspaceFocusMode] = useState(false);
   const [activePage, setActivePage] = useState<"workbench" | "setup">("workbench");
   const [prefixDrafts, setPrefixDrafts] = useState<Record<SequencePrefixType, string>>({
     changeRequest: "",
@@ -168,8 +170,16 @@ function Content() {
   const startedCount = visibleNotices.filter((notice) => notice.state === "started").length;
   const completedCount = visibleNotices.filter((notice) => notice.state === "completed").length;
   const totalCount = visibleNotices.length;
-  const selectedNotice =
+  const selectedRequest =
     requests.find((notice) => String(notice._id) === selectedNoticeId) ?? null;
+  const selectedNotification =
+    notifications.find((notice) => String(notice._id) === selectedNoticeId) ?? null;
+  const selectedNotice =
+    selectedWorkspaceKind === "ecn"
+      ? selectedNotification
+      : selectedWorkspaceKind === "ecr"
+        ? selectedRequest
+        : null;
 
   useEffect(() => {
     if (!sequencePrefixes) {
@@ -191,6 +201,12 @@ function Content() {
     setIsCreateOpen(false);
     setCreateError(null);
     setDraftDescription("");
+  };
+
+  const closeWorkspace = () => {
+    setSelectedNoticeId(null);
+    setSelectedWorkspaceKind(null);
+    setIsWorkspaceFocusMode(false);
   };
 
   const handleCreateNotice = async (e: React.FormEvent) => {
@@ -218,26 +234,27 @@ function Content() {
     }
   };
 
-  const handleCardClick = async (notice: {
-    _id: (typeof requests)[number]["_id"];
-    id: string;
-    state: ChangeNoticeState;
-  }) => {
-    if (notice.state !== "proposed") {
+  const openWorkspaceForCard = (noticeId: string, workspaceKind: "ecr" | "ecn") => {
+    setSelectedWorkspaceKind(workspaceKind);
+    setSelectedNoticeId(noticeId);
+  };
+
+  const handleStartNoticeFromWorkspace = async () => {
+    if (!selectedRequest || selectedWorkspaceKind !== "ecr") {
       return;
     }
 
-    const confirmed = window.confirm(`Start change notice ${notice.id}?`);
+    const confirmed = window.confirm(`Start change request ${selectedRequest.id}?`);
     if (!confirmed) {
       return;
     }
 
-    setStartingNoticeId(String(notice._id));
+    setStartingNoticeId(String(selectedRequest._id));
     try {
-      await startChangeNotice({ noticeId: notice._id });
+      await startChangeNotice({ noticeId: selectedRequest._id });
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Failed to start change notice.",
+        error instanceof Error ? error.message : "Failed to start change request.",
       );
     } finally {
       setStartingNoticeId(null);
@@ -314,9 +331,19 @@ function Content() {
         />
       ) : (
         <>
-      <div className="lg:grid lg:grid-cols-[15rem_minmax(20rem,33vw)_1fr] lg:gap-4">
+      <div
+        className={
+          isWorkspaceFocusMode && selectedNotice
+            ? "lg:grid lg:grid-cols-1 lg:gap-4"
+            : "lg:grid lg:grid-cols-[15rem_minmax(20rem,33vw)_1fr] lg:gap-4"
+        }
+      >
         <aside
-          className={`${selectedNotice ? "hidden" : "block"} rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:block`}
+          className={`${
+            selectedNotice || (isWorkspaceFocusMode && selectedNotice) ? "hidden" : "block"
+          } rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:block ${
+            isWorkspaceFocusMode && selectedNotice ? "lg:hidden" : ""
+          }`}
         >
           <div className="mb-4">
             <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
@@ -347,7 +374,11 @@ function Content() {
         </aside>
 
         <section
-          className={`${selectedNotice ? "hidden" : "block"} mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:mt-0 lg:block`}
+          className={`${
+            selectedNotice ? "hidden" : "block"
+          } mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:mt-0 lg:block ${
+            isWorkspaceFocusMode && selectedNotice ? "lg:hidden" : ""
+          }`}
         >
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -393,16 +424,18 @@ function Content() {
                 <ResourceCard
                   key={notice._id}
                   title={notice.id}
-                description={notice.description}
-                state={notice.state}
-                author={notice.authorName ?? notice.authorEmail ?? notice.author}
-                timestamp={notice.timestamp}
-                  isClickable={notice.state === "proposed"}
-                  canOpenWorkspace
+                  description={notice.description}
+                  state={notice.state}
+                  author={notice.authorName ?? notice.authorEmail ?? notice.author}
+                  timestamp={notice.timestamp}
+                  isClickable
+                  canOpenWorkspace={false}
                   isBusy={startingNoticeId === String(notice._id)}
-                  isSelected={selectedNoticeId === String(notice._id)}
-                  onClick={() => void handleCardClick(notice)}
-                  onOpen={() => setSelectedNoticeId(String(notice._id))}
+                  isSelected={
+                    selectedWorkspaceKind === "ecr" && selectedNoticeId === String(notice._id)
+                  }
+                  onClick={() => openWorkspaceForCard(String(notice._id), "ecr")}
+                  onOpen={() => openWorkspaceForCard(String(notice._id), "ecr")}
                 />
               ))}
 
@@ -415,12 +448,14 @@ function Content() {
                   state={notice.state}
                   author={notice.authorName ?? notice.authorEmail ?? notice.author}
                   timestamp={notice.timestamp}
-                  isClickable={false}
+                  isClickable
                   canOpenWorkspace={false}
                   isBusy={false}
-                  isSelected={false}
-                  onClick={() => {}}
-                  onOpen={() => {}}
+                  isSelected={
+                    selectedWorkspaceKind === "ecn" && selectedNoticeId === String(notice._id)
+                  }
+                  onClick={() => openWorkspaceForCard(String(notice._id), "ecn")}
+                  onOpen={() => openWorkspaceForCard(String(notice._id), "ecn")}
                 />
               ))}
           </div>
@@ -432,11 +467,24 @@ function Content() {
           {selectedNotice ? (
             <EcnWorkspace
               notice={selectedNotice}
-              onClose={() => setSelectedNoticeId(null)}
+              workspaceKind={selectedWorkspaceKind ?? "ecr"}
+              isFocusMode={isWorkspaceFocusMode}
+              onStartRequest={
+                selectedWorkspaceKind === "ecr" && selectedRequest
+                  ? () => void handleStartNoticeFromWorkspace()
+                  : undefined
+              }
+              isStartingRequest={
+                selectedWorkspaceKind === "ecr" &&
+                !!selectedRequest &&
+                startingNoticeId === String(selectedRequest._id)
+              }
+              onToggleFocusMode={() => setIsWorkspaceFocusMode((current) => !current)}
+              onClose={closeWorkspace}
             />
           ) : (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-              Select an ECN from the list to open its workspace.
+              Select an ECR or ECN from the list to open its workspace.
             </div>
           )}
         </section>
@@ -618,6 +666,11 @@ function NavRailButton({
 
 function EcnWorkspace({
   notice,
+  workspaceKind,
+  isFocusMode,
+  onStartRequest,
+  isStartingRequest,
+  onToggleFocusMode,
   onClose,
 }: {
   notice: {
@@ -626,17 +679,26 @@ function EcnWorkspace({
     state: ChangeNoticeState;
     description: string;
   };
+  workspaceKind: "ecr" | "ecn";
+  isFocusMode: boolean;
+  onStartRequest?: () => void;
+  isStartingRequest?: boolean;
+  onToggleFocusMode: () => void;
   onClose: () => void;
 }) {
-  const targets = useQuery(api.changes.changeNoticeTargetsForEcn, {
-    changeNoticeId: notice._id as never,
-  });
-  const suggestions = useQuery(api.changes.impactAnalysisSuggestionsForEcn, {
-    changeNoticeId: notice._id as never,
-  });
-  const links = useQuery(api.changes.changeNoticeLinksForEcn, {
-    changeNoticeId: notice._id as never,
-  });
+  const isEcrWorkspace = workspaceKind === "ecr";
+  const targets = useQuery(
+    api.changes.changeNoticeTargetsForEcn,
+    isEcrWorkspace ? { changeNoticeId: notice._id as never } : "skip",
+  );
+  const suggestions = useQuery(
+    api.changes.impactAnalysisSuggestionsForEcn,
+    isEcrWorkspace ? { changeNoticeId: notice._id as never } : "skip",
+  );
+  const links = useQuery(
+    api.changes.changeNoticeLinksForEcn,
+    isEcrWorkspace ? { changeNoticeId: notice._id as never } : "skip",
+  );
   const items = useQuery(api.products.listItems, {}) ?? [];
   const products = useQuery(api.products.listProducts, {}) ?? [];
 
@@ -696,6 +758,8 @@ function EcnWorkspace({
   );
   const [pdmStatus, setPdmStatus] = useState<string | null>(null);
   const [pdmResult, setPdmResult] = useState<string | null>(null);
+  const [isPdmImportOpen, setIsPdmImportOpen] = useState(false);
+  const workspaceLabel = workspaceKind === "ecr" ? "ECR Workspace" : "ECN Workspace";
 
   const productOptions = products
     .map((product) => {
@@ -795,34 +859,109 @@ function EcnWorkspace({
   };
 
   return (
+    <>
     <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
           <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            ECN Workspace
+            {workspaceLabel}
           </p>
           <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
             {notice.id}
           </h2>
-          <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{notice.description}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+          {isEcrWorkspace && notice.state === "proposed" && onStartRequest && (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
+              disabled={isStartingRequest}
+              onClick={onStartRequest}
+              type="button"
+            >
+              <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M8 5v14l11-7-11-7Z"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.75"
+                />
+              </svg>
+              {isStartingRequest ? "Starting..." : "Start ECR"}
+            </button>
+          )}
+          <button
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+            onClick={onToggleFocusMode}
+            type="button"
+          >
+            <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none">
+              {isFocusMode ? (
+                <path
+                  d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5M10 10 4 4M14 10l6-6M14 14l6 6M10 14l-6 6"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.75"
+                />
+              ) : (
+                <path
+                  d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5M4 9l6-5M20 9l-6-5M20 15l-6 5M4 15l6 5"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.75"
+                />
+              )}
+            </svg>
+            {isFocusMode ? "Exit Focus Mode" : "Focus Workspace"}
+          </button>
+          <button
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+            onClick={onClose}
+            type="button"
+          >
+            <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M6 6l12 12M18 6 6 18"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.9"
+              />
+            </svg>
+            Close Workspace
+          </button>
         </div>
-        <button
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-          onClick={onClose}
-          type="button"
-        >
-          Close Workspace
-        </button>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+          <p className="text-base leading-relaxed text-slate-800 dark:text-slate-100 md:text-lg">
+            {notice.description || "No description provided."}
+          </p>
+        </div>
       </div>
 
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-2">
         <div className="space-y-5">
+          {!isEcrWorkspace && (
+            <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                ECN Workflow
+              </h3>
+              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                Opened from the ECN card. Workflow/approval actions for ECNs should be performed
+                here.
+              </p>
+            </div>
+          )}
+          {isEcrWorkspace && (
           <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Add Product To ECN
+              Add Product To ECR
             </h3>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Adds the product&apos;s item record as a target on this ECN.
+              Adds the product&apos;s item record as a target on this ECR.
             </p>
             <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm">
@@ -908,7 +1047,9 @@ function EcnWorkspace({
               <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{analysisStatus}</p>
             )}
           </div>
+          )}
 
+          {isEcrWorkspace && (
           <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Targets</h3>
             <div className="mt-3 space-y-2 text-sm">
@@ -936,9 +1077,11 @@ function EcnWorkspace({
               ))}
             </div>
           </div>
+          )}
         </div>
 
         <div className="space-y-5">
+          {isEcrWorkspace && (
           <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
               Impact Analysis Suggestions
@@ -976,45 +1119,32 @@ function EcnWorkspace({
               ))}
             </div>
           </div>
+          )}
 
           <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
               PDM Import Placeholder (Vault Push)
             </h3>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Use this to simulate a middleware push from Autodesk Vault Professional into products/items.
+              Open on demand for the one-time import/preview flow for this notice.
             </p>
-            <textarea
-              className="mt-3 min-h-64 w-full rounded-md border border-slate-300 bg-white p-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-950"
-              value={pdmJson}
-              onChange={(e) => setPdmJson(e.target.value)}
-            />
             <div className="mt-3 flex flex-wrap gap-2">
               <button
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-                onClick={() => void handlePdmImport("preview")}
-                type="button"
-              >
-                Preview Payload
-              </button>
-              <button
                 className="rounded-md bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900"
-                onClick={() => void handlePdmImport("upsert")}
+                onClick={() => setIsPdmImportOpen(true)}
                 type="button"
               >
-                Import Product + BOM
+                Open PDM Import
               </button>
             </div>
             {pdmStatus && (
-              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{pdmStatus}</p>
-            )}
-            {pdmResult && (
-              <pre className="mt-2 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-800 dark:bg-slate-950">
-                {pdmResult}
-              </pre>
+              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                Last run: {pdmStatus}
+              </p>
             )}
           </div>
 
+          {isEcrWorkspace && (
           <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Linked ECNs</h3>
             <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
@@ -1022,9 +1152,78 @@ function EcnWorkspace({
               <p>Child links: {links?.asChild.length ?? 0}</p>
             </div>
           </div>
+          )}
         </div>
       </div>
     </section>
+
+    {isPdmImportOpen && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+        onClick={() => setIsPdmImportOpen(false)}
+        role="presentation"
+      >
+        <div
+          className="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-800 dark:bg-slate-900"
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pdm-import-title"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3
+                className="text-lg font-semibold text-slate-900 dark:text-slate-100"
+                id="pdm-import-title"
+              >
+                PDM Import Placeholder (Vault Push)
+              </h3>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                Simulate a middleware push from Autodesk Vault Professional into products/items.
+              </p>
+            </div>
+            <button
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+              onClick={() => setIsPdmImportOpen(false)}
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+
+          <textarea
+            className="mt-4 min-h-64 w-full rounded-md border border-slate-300 bg-white p-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-950"
+            value={pdmJson}
+            onChange={(e) => setPdmJson(e.target.value)}
+          />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+              onClick={() => void handlePdmImport("preview")}
+              type="button"
+            >
+              Preview Payload
+            </button>
+            <button
+              className="rounded-md bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900"
+              onClick={() => void handlePdmImport("upsert")}
+              type="button"
+            >
+              Import Product + BOM
+            </button>
+          </div>
+          {pdmStatus && (
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{pdmStatus}</p>
+          )}
+          {pdmResult && (
+            <pre className="mt-2 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-2 text-xs dark:border-slate-800 dark:bg-slate-950">
+              {pdmResult}
+            </pre>
+          )}
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -1281,7 +1480,7 @@ function ResourceCard({
         <p>Author: {authorDisplay}</p>
         {isClickable && (
           <p className="font-medium text-slate-700 dark:text-slate-200">
-            {isBusy ? "Starting..." : 'Click to start this notice'}
+            {isBusy ? "Updating..." : "Click to open workspace"}
           </p>
         )}
       </div>
