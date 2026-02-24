@@ -70,4 +70,7 @@ export const api = {
     list: fn("audit:list"),
     exportCsv: fn("audit:exportCsv"),
   },
+  devSeed: {
+    seedDemoData: fn("devSeed:seedDemoData"),
+  },
 } as const;

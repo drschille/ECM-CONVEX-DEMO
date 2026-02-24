@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "convex/react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { api } from "@/lib/convexApi";
 import { PageCard } from "./OrgDashboardPage";
@@ -12,6 +12,11 @@ export function SettingsPage({ organizationId }: { organizationId: string }) {
   const policy = useQuery(api.organizations.getApprovalPolicy, { organizationId: organizationId as any });
   const updateMemberRole = useMutation(api.organizations.updateMemberRole);
   const upsertApprovalPolicy = useMutation(api.organizations.upsertApprovalPolicy);
+  const seedDemoData = useMutation(api.devSeed.seedDemoData);
+  const [seedState, setSeedState] = useState<{
+    status: "idle" | "running" | "success" | "error";
+    message?: string;
+  }>({ status: "idle" });
   const form = useForm<PolicyForm>({
     defaultValues: { minApproverCount: 1, extraSignoffCategories: "" },
   });
@@ -25,6 +30,7 @@ export function SettingsPage({ organizationId }: { organizationId: string }) {
   }, [form, policy]);
 
   const isAdmin = org?.myRole === "admin";
+  const canSeed = import.meta.env.DEV && isAdmin;
 
   return (
     <div className="space-y-4">
@@ -36,6 +42,68 @@ export function SettingsPage({ organizationId }: { organizationId: string }) {
           <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             Admin-only controls are disabled for your role.
           </p>
+        )}
+        {import.meta.env.DEV && (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Dev Seed
+                </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  Populate this organization with sample items, CRs, approvals, and audit events.
+                </p>
+              </div>
+              <button
+                className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+                disabled={!canSeed || seedState.status === "running"}
+                onClick={() => {
+                  if (!canSeed) return;
+                  setSeedState({ status: "running" });
+                  void (async () => {
+                    try {
+                      const result = await seedDemoData({
+                        organizationId: organizationId as any,
+                      });
+                      if (result?.skipped) {
+                        setSeedState({
+                          status: "success",
+                          message: `Skipped: ${result.reason ?? "organization already seeded"}`,
+                        });
+                        return;
+                      }
+                      setSeedState({
+                        status: "success",
+                        message: `Seeded ${result?.createdItemCount ?? 0} items and ${result?.createdChangeRequestCount ?? 0} change requests.`,
+                      });
+                    } catch (error) {
+                      setSeedState({
+                        status: "error",
+                        message: error instanceof Error ? error.message : "Seed failed",
+                      });
+                    }
+                  })();
+                }}
+                type="button"
+              >
+                {seedState.status === "running" ? "Seeding..." : "Seed Demo Data"}
+              </button>
+            </div>
+            {seedState.message && (
+              <p
+                className={`mt-2 text-xs ${
+                  seedState.status === "error" ? "text-rose-700" : "text-slate-600"
+                }`}
+              >
+                {seedState.message}
+              </p>
+            )}
+            {!isAdmin && (
+              <p className="mt-2 text-xs text-amber-700">
+                Requires admin role to run in the UI.
+              </p>
+            )}
+          </div>
         )}
       </PageCard>
 

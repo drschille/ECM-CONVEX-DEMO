@@ -33,6 +33,7 @@ export default defineConfig([
         project: [
           "./tsconfig.node.json",
           "./tsconfig.app.json",
+          "./tsconfig.test.json",
           "./convex/tsconfig.json",
         ],
       },
@@ -62,6 +63,7 @@ export default defineConfig([
 
       // Allow explicit `any`s
       "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-empty-object-type": "off",
 
       // START: Allow implicit `any`s
       "@typescript-eslint/no-unsafe-argument": "off",
