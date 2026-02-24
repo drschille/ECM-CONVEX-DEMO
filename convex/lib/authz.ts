@@ -37,7 +37,7 @@ export async function requireActor(ctx: Ctx): Promise<Actor> {
 
   const byToken = await ctx.db
     .query("userProfiles")
-    .withIndex("by_auth_user_id", (q) => q.eq("authUserId", identity.subject as Id<"users">))
+    .withIndex("by_auth_user_id", (q) => q.eq("authUserId", identity.tokenIdentifier))
     .unique();
 
   if (byToken) {

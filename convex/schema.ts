@@ -46,7 +46,7 @@ export default defineSchema({
   ...authTables,
 
   userProfiles: defineTable({
-    authUserId: v.optional(v.id("users")),
+    authUserId: v.optional(v.string()),
     email: v.string(),
     name: v.string(),
     avatarUrl: v.optional(v.string()),
