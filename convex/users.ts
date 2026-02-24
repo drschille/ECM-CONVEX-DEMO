@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 
 export const me = query({
   args: {},
@@ -37,6 +38,7 @@ export const bootstrapProfile = mutation({
 
     if (existing) {
       await ctx.db.patch("userProfiles", existing._id, {
+        authUserId: identity.subject as Id<"users">,
         lastSeenAt: now,
         updatedAt: now,
       });
@@ -44,11 +46,25 @@ export const bootstrapProfile = mutation({
     }
 
     return await ctx.db.insert("userProfiles", {
+      authUserId: identity.subject as Id<"users">,
       email,
       name,
       lastSeenAt: now,
       createdAt: now,
       updatedAt: now,
     });
+  },
+});
+
+export const myProfile = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const email = identity.email ?? identity.tokenIdentifier;
+    return await ctx.db
+      .query("userProfiles")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .unique();
   },
 });
