@@ -161,7 +161,7 @@ export async function applyEcoClosureToItems(
     [];
 
   for (const link of links) {
-    const item = await ctx.db.get(link.itemId);
+    const item = await ctx.db.get("items", link.itemId);
     if (!item) continue;
     const nextRevision = incrementRevision(item.revision);
     await ctx.db.patch("items", item._id, {
@@ -184,7 +184,7 @@ export async function applyEcoClosureToItems(
     });
   }
 
-  const eco = changeRequest.ecoId ? await ctx.db.get(changeRequest.ecoId) : null;
+  const eco = changeRequest.ecoId ? await ctx.db.get("ecos", changeRequest.ecoId) : null;
   if (!eco) {
     throw new ConvexError({ code: "ECO_REQUIRED", message: "Approved CR must have an ECO." });
   }

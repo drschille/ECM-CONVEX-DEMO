@@ -74,7 +74,7 @@ export const get = query({
   args: { organizationId: v.id("organizations"), itemId: v.id("items") },
   handler: async (ctx, args) => {
     await requireOrgRole(ctx, args.organizationId, ["admin", "engineer", "approver", "viewer"]);
-    const item = await ctx.db.get(args.itemId);
+    const item = await ctx.db.get("items", args.itemId);
     if (!item || item.organizationId !== args.organizationId) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Item not found" });
     }
@@ -147,7 +147,7 @@ export const update = mutation({
   },
   handler: async (ctx, args) => {
     const { actor } = await requireOrgRole(ctx, args.organizationId, ["admin", "engineer"]);
-    const item = await ctx.db.get(args.itemId);
+    const item = await ctx.db.get("items", args.itemId);
     if (!item || item.organizationId !== args.organizationId) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Item not found" });
     }

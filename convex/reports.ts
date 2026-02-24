@@ -1,7 +1,7 @@
+import { anyApi } from "convex/server";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { action, query } from "./_generated/server";
-import { api } from "./_generated/api";
 import { requireActor, requireOrgRole } from "./lib/authz";
 import { isTerminalStatus } from "./lib/domain";
 
@@ -105,7 +105,7 @@ export const exportChangeRequestsCsv = action({
     endDate: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const rows = await ctx.runQuery(api.reports.exportChangeRequestsRows, args);
+    const rows = await ctx.runQuery(anyApi.reports.exportChangeRequestsRows, args);
     const headers = [
       "crNumber",
       "title",
@@ -117,7 +117,17 @@ export const exportChangeRequestsCsv = action({
       "createdAt",
       "updatedAt",
     ];
-    const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const escape = (value: unknown) => {
+      const normalized =
+        value === null || value === undefined
+          ? ""
+          : typeof value === "string"
+            ? value
+            : typeof value === "number" || typeof value === "boolean"
+              ? String(value)
+              : JSON.stringify(value);
+      return `"${normalized.replaceAll('"', '""')}"`;
+    };
     const lines = [headers.join(",")];
     for (const row of rows) {
       lines.push(

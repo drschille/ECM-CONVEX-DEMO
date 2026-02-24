@@ -10,13 +10,13 @@ async function validateTarget(
   entityId: string,
 ) {
   if (entityType === "changeRequest") {
-    const cr = await ctx.db.get(entityId);
+    const cr = await ctx.db.get("changeRequests", entityId);
     if (!cr || cr.organizationId !== organizationId) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Change request not found" });
     }
     return;
   }
-  const eco = await ctx.db.get(entityId);
+  const eco = await ctx.db.get("ecos", entityId);
   if (!eco || eco.organizationId !== organizationId) {
     throw new ConvexError({ code: "NOT_FOUND", message: "ECO not found" });
   }
@@ -100,7 +100,7 @@ export const remove = mutation({
   args: { organizationId: v.id("organizations"), attachmentId: v.id("attachments") },
   handler: async (ctx, args) => {
     const { actor } = await requireOrgRole(ctx, args.organizationId, ["admin", "engineer"]);
-    const attachment = await ctx.db.get(args.attachmentId);
+    const attachment = await ctx.db.get("attachments", args.attachmentId);
     if (!attachment || attachment.organizationId !== args.organizationId) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Attachment not found" });
     }

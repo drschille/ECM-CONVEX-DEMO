@@ -1,10 +1,10 @@
 "use node";
 
 import Papa from "papaparse";
+import { anyApi } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import { z } from "zod";
 import { action } from "./_generated/server";
-import { api } from "./_generated/api";
 
 const csvRowSchema = z.object({
   itemNumber: z.string().trim().min(1),
@@ -81,7 +81,7 @@ export const importItemsCsv: any = action({
       });
     });
 
-    return await ctx.runMutation(api.items.commitCsvImport, {
+    return await ctx.runMutation(anyApi.items.commitCsvImport, {
       organizationId: args.organizationId,
       fileName: args.fileName,
       rows,

@@ -18,7 +18,7 @@ async function resolveMentionProfileIds(
   const results: Id<"userProfiles">[] = [];
   for (const membership of memberships) {
     if (!membership.isActive) continue;
-    const profile = await ctx.db.get(membership.profileId);
+    const profile = await ctx.db.get("userProfiles", membership.profileId);
     if (!profile) continue;
     const name = profile.name.toLowerCase();
     const emailUser = profile.email.split("@")[0]?.toLowerCase() ?? "";
@@ -34,13 +34,13 @@ async function validateEntity(
   args: { organizationId: Id<"organizations">; entityType: "changeRequest" | "eco"; entityId: string },
 ) {
   if (args.entityType === "changeRequest") {
-    const entity = await ctx.db.get(args.entityId as Id<"changeRequests">);
+    const entity = await ctx.db.get("changeRequests", args.entityId as Id<"changeRequests">);
     if (!entity || entity.organizationId !== args.organizationId) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Change request not found" });
     }
     return entity;
   }
-  const entity = await ctx.db.get(args.entityId as Id<"ecos">);
+  const entity = await ctx.db.get("ecos", args.entityId as Id<"ecos">);
   if (!entity || entity.organizationId !== args.organizationId) {
     throw new ConvexError({ code: "NOT_FOUND", message: "ECO not found" });
   }
@@ -83,7 +83,7 @@ export const add = mutation({
     }
     await validateEntity(ctx, args);
     if (args.parentCommentId) {
-      const parent = await ctx.db.get(args.parentCommentId);
+      const parent = await ctx.db.get("comments", args.parentCommentId);
       if (
         !parent ||
         parent.organizationId !== args.organizationId ||

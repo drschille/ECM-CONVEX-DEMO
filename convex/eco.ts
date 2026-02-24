@@ -7,7 +7,7 @@ export const get = query({
   args: { organizationId: v.id("organizations"), ecoId: v.id("ecos") },
   handler: async (ctx, args) => {
     await requireOrgRole(ctx, args.organizationId, ["admin", "engineer", "approver", "viewer"]);
-    const eco = await ctx.db.get(args.ecoId);
+    const eco = await ctx.db.get("ecos", args.ecoId);
     if (!eco || eco.organizationId !== args.organizationId) {
       throw new ConvexError({ code: "NOT_FOUND", message: "ECO not found" });
     }
@@ -29,7 +29,7 @@ export const updateChecklist = mutation({
   },
   handler: async (ctx, args) => {
     const { actor } = await requireOrgRole(ctx, args.organizationId, ["admin", "engineer"]);
-    const eco = await ctx.db.get(args.ecoId);
+    const eco = await ctx.db.get("ecos", args.ecoId);
     if (!eco || eco.organizationId !== args.organizationId) {
       throw new ConvexError({ code: "NOT_FOUND", message: "ECO not found" });
     }
@@ -74,7 +74,7 @@ export const recordSignoff = mutation({
   },
   handler: async (ctx, args) => {
     const { actor } = await requireOrgRole(ctx, args.organizationId, ["admin", "approver"]);
-    const eco = await ctx.db.get(args.ecoId);
+    const eco = await ctx.db.get("ecos", args.ecoId);
     if (!eco || eco.organizationId !== args.organizationId) {
       throw new ConvexError({ code: "NOT_FOUND", message: "ECO not found" });
     }
@@ -107,7 +107,7 @@ export const recordSignoff = mutation({
       metadata: { category, decision: args.decision },
     });
 
-    const cr = await ctx.db.get(eco.changeRequestId);
+    const cr = await ctx.db.get("changeRequests", eco.changeRequestId);
     if (cr) {
       await createNotifications(ctx, {
         organizationId: args.organizationId,

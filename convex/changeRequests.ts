@@ -36,7 +36,10 @@ async function ensureCrInOrg(
   organizationId: Id<"organizations">,
   changeRequestId: Id<"changeRequests">,
 ) {
-  const changeRequest = (await ctx.db.get(changeRequestId)) as Doc<"changeRequests"> | null;
+  const changeRequest = (await ctx.db.get(
+    "changeRequests",
+    changeRequestId,
+  )) as Doc<"changeRequests"> | null;
   if (!changeRequest || changeRequest.organizationId !== organizationId) {
     throw new ConvexError({ code: "NOT_FOUND", message: "Change request not found" });
   }
@@ -65,7 +68,7 @@ async function replaceAffectedItems(
   for (const itemId of args.affectedItemIds) {
     if (seen.has(String(itemId))) continue;
     seen.add(String(itemId));
-    const item = await ctx.db.get(itemId);
+    const item = await ctx.db.get("items", itemId);
     if (!item || item.organizationId !== args.organizationId) {
       throw new ConvexError({
         code: "VALIDATION",
@@ -185,7 +188,7 @@ export const getDetail = query({
             .eq("entityId", String(args.changeRequestId)),
         )
         .collect(),
-      changeRequest.ecoId ? ctx.db.get(changeRequest.ecoId) : Promise.resolve(null),
+      changeRequest.ecoId ? ctx.db.get("ecos", changeRequest.ecoId) : Promise.resolve(null),
     ]);
 
     return {
@@ -459,7 +462,7 @@ export const transitionStatus = mutation({
 
     const now = Date.now();
     await ctx.db.patch("changeRequests", current._id, updateStatusTimestamps(current, args.toStatus, now));
-    const refreshed = await ctx.db.get(current._id);
+    const refreshed = await ctx.db.get("changeRequests", current._id);
     if (!refreshed) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Change request disappeared" });
     }

@@ -1,7 +1,7 @@
+import { anyApi } from "convex/server";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { action, query } from "./_generated/server";
-import { api } from "./_generated/api";
 import { requireOrgRole } from "./lib/authz";
 
 export const list = query({
@@ -67,7 +67,7 @@ export const exportCsv = action({
     endDate: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const rows = await ctx.runQuery(api.audit.exportRows, args);
+    const rows = await ctx.runQuery(anyApi.audit.exportRows, args);
     const headers = [
       "timestamp",
       "entityType",
@@ -79,7 +79,17 @@ export const exportCsv = action({
       "comment",
       "metadataJson",
     ];
-    const escape = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const escape = (value: unknown) => {
+      const normalized =
+        value === null || value === undefined
+          ? ""
+          : typeof value === "string"
+            ? value
+            : typeof value === "number" || typeof value === "boolean"
+              ? String(value)
+              : JSON.stringify(value);
+      return `"${normalized.replaceAll('"', '""')}"`;
+    };
     const lines = [headers.join(",")];
     for (const row of rows) {
       lines.push(

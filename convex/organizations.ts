@@ -54,7 +54,7 @@ export const listMyOrganizations = query({
       memberships
         .filter((m) => m.isActive)
         .map(async (membership) => {
-          const organization = await ctx.db.get(membership.organizationId);
+          const organization = await ctx.db.get("organizations", membership.organizationId);
           if (!organization) return null;
           return {
             membershipId: membership._id,
@@ -79,7 +79,7 @@ export const get = query({
       "approver",
       "viewer",
     ]);
-    const org = await ctx.db.get(args.organizationId);
+    const org = await ctx.db.get("organizations", args.organizationId);
     if (!org) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Organization not found" });
     }
@@ -163,7 +163,7 @@ export const listMembers = query({
     const profiles = await Promise.all(
       memberships.map(async (membership) => ({
         membership,
-        profile: await ctx.db.get(membership.profileId),
+        profile: await ctx.db.get("userProfiles", membership.profileId),
       })),
     );
     return profiles
@@ -194,7 +194,7 @@ export const updateMemberRole = mutation({
   },
   handler: async (ctx, args) => {
     const { actor } = await requireOrgRole(ctx, args.organizationId, ["admin"]);
-    const membership = await ctx.db.get(args.membershipId);
+    const membership = await ctx.db.get("memberships", args.membershipId);
     if (!membership || membership.organizationId !== args.organizationId) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Membership not found" });
     }

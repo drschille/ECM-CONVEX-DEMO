@@ -47,7 +47,7 @@ export const markRead = mutation({
   args: { notificationId: v.id("notifications") },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
-    const notification = await ctx.db.get(args.notificationId);
+    const notification = await ctx.db.get("notifications", args.notificationId);
     if (!notification) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Notification not found" });
     }

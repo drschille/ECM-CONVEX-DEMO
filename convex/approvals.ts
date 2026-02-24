@@ -8,7 +8,7 @@ async function getChangeRequestOrThrow(
   organizationId: any,
   changeRequestId: any,
 ) {
-  const cr = await ctx.db.get(changeRequestId);
+  const cr = await ctx.db.get("changeRequests", changeRequestId);
   if (!cr || cr.organizationId !== organizationId) {
     throw new ConvexError({ code: "NOT_FOUND", message: "Change request not found" });
   }
