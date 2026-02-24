@@ -239,40 +239,57 @@ export function SettingsPage({ organizationId }: { organizationId: string }) {
               })(e);
             }}
           >
-            <p className="mb-2 text-xs text-slate-600">
+            <p className="mb-3 text-xs leading-5 text-slate-600">
               Add an existing user by email, or pre-provision a profile before they sign in.
             </p>
-            <div className="grid gap-2 md:grid-cols-[1.4fr_1fr_0.9fr_auto]">
-              <input
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                disabled={!isAdmin || memberSetup.busy}
-                placeholder="user@company.com"
-                type="email"
-                {...addMemberForm.register("email", { required: true })}
-              />
-              <input
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                disabled={!isAdmin || memberSetup.busy}
-                placeholder="Optional name"
-                {...addMemberForm.register("name")}
-              />
-              <select
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                disabled={!isAdmin || memberSetup.busy}
-                {...addMemberForm.register("role")}
-              >
-                <option value="admin">Admin</option>
-                <option value="engineer">Engineer</option>
-                <option value="approver">Approver</option>
-                <option value="viewer">Viewer</option>
-              </select>
-              <button
-                className="rounded-md bg-teal-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
-                disabled={!isAdmin || memberSetup.busy}
-                type="submit"
-              >
-                {memberSetup.busy ? "Adding..." : "Add"}
-              </button>
+            <div className="grid min-w-0 gap-3 lg:grid-cols-2">
+              <label className="min-w-0">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-600">
+                  Email
+                </span>
+                <input
+                  className="w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  disabled={!isAdmin || memberSetup.busy}
+                  placeholder="user@company.com"
+                  type="email"
+                  {...addMemberForm.register("email", { required: true })}
+                />
+              </label>
+              <label className="min-w-0">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-600">
+                  Name
+                </span>
+                <input
+                  className="w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  disabled={!isAdmin || memberSetup.busy}
+                  placeholder="Optional name"
+                  {...addMemberForm.register("name")}
+                />
+              </label>
+              <label className="min-w-0">
+                <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-600">
+                  Role
+                </span>
+                <select
+                  className="w-full min-w-0 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  disabled={!isAdmin || memberSetup.busy}
+                  {...addMemberForm.register("role")}
+                >
+                  <option value="admin">Admin</option>
+                  <option value="engineer">Engineer</option>
+                  <option value="approver">Approver</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+              </label>
+              <div className="flex items-end">
+                <button
+                  className="w-full rounded-md bg-teal-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+                  disabled={!isAdmin || memberSetup.busy}
+                  type="submit"
+                >
+                  {memberSetup.busy ? "Adding..." : "Add Member"}
+                </button>
+              </div>
             </div>
             {(memberSetup.message || memberSetup.error) && (
               <p className={`mt-2 text-xs ${memberSetup.error ? "text-rose-700" : "text-slate-600"}`}>
@@ -282,10 +299,13 @@ export function SettingsPage({ organizationId }: { organizationId: string }) {
           </form>
           <div className="space-y-2">
             {(members ?? []).map((member: any) => (
-              <div key={member.membershipId} className="flex items-center justify-between rounded-lg border border-slate-200 p-3 text-sm">
-                <div>
+              <div
+                key={member.membershipId}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-3 text-sm"
+              >
+                <div className="min-w-0 flex-1">
                   <p className="font-medium text-slate-900">{member.name}</p>
-                  <p className="text-xs text-slate-600">{member.email}</p>
+                  <p className="truncate text-xs text-slate-600">{member.email}</p>
                 </div>
                 <select
                   className="rounded-lg border border-slate-300 px-2 py-1 text-xs"

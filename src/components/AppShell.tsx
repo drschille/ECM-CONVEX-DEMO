@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useConvexAuth } from "convex/react";
 import { NotificationsPanel } from "./NotificationsPanel";
@@ -17,6 +17,7 @@ export function AppShell() {
   const { signOut } = useAuthActions();
   const { isAuthenticated } = useConvexAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const orgMatch = location.pathname.match(/^\/org\/([^/]+)/);
   const orgId = orgMatch?.[1];
   const { myOrgs, org } = useBootstrapAndOrg();
@@ -34,6 +35,26 @@ export function AppShell() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {(myOrgs ?? []).length > 0 && (
+              <label className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-2 py-1.5">
+                <span className="text-xs uppercase tracking-wide text-slate-500">Org</span>
+                <select
+                  className="max-w-52 bg-transparent text-sm text-slate-800 outline-none"
+                  onChange={(e) => {
+                    const nextOrgId = e.target.value;
+                    if (!nextOrgId || nextOrgId === orgId) return;
+                    void navigate(`/org/${nextOrgId}/dashboard`);
+                  }}
+                  value={orgId ?? ""}
+                >
+                  {(myOrgs ?? []).map((entry: any) => (
+                    <option key={entry.organizationId} value={entry.organizationId}>
+                      {entry.name} ({entry.role})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {orgId && <NotificationsPanel organizationId={orgId} />}
             <Link className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50" to="/login">
               Switch
@@ -58,19 +79,6 @@ export function AppShell() {
             <p className="text-sm font-semibold text-slate-900">{org?.name ?? orgId ?? "org"}</p>
             <p className="text-xs text-slate-500">{org?.myRole ?? ""}</p>
           </div>
-          {(myOrgs ?? []).length > 1 && (
-            <div className="mb-3 space-y-1">
-              {(myOrgs ?? []).slice(0, 4).map((entry: any) => (
-                <Link
-                  key={entry.organizationId}
-                  className="block rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
-                  to={`/org/${entry.organizationId}/dashboard`}
-                >
-                  {entry.name} ({entry.role})
-                </Link>
-              ))}
-            </div>
-          )}
           <nav className="flex flex-col gap-1">
             {nav.map((item) => (
               <NavLink
