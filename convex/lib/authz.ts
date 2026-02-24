@@ -29,26 +29,39 @@ function forbidden(message: string): never {
   throw new ConvexError({ code: "FORBIDDEN", message });
 }
 
+function authIdentityCandidates(identity: { subject: string; tokenIdentifier: string }): string[] {
+  const tokenParts = identity.tokenIdentifier.split("|").filter(Boolean);
+  const subjectParts = identity.subject.split("|").filter(Boolean);
+  const nonUrlTokenParts = tokenParts.filter((part) => !/^https?:\/\//.test(part));
+  const stableKey = nonUrlTokenParts[0] ?? subjectParts[0] ?? identity.subject;
+  return [stableKey, ...nonUrlTokenParts, ...subjectParts, identity.subject, identity.tokenIdentifier].filter(
+    (value, index, arr): value is string =>
+      Boolean(value) && arr.findIndex((entry) => entry === value) === index,
+  );
+}
+
 export async function requireActor(ctx: Ctx): Promise<Actor> {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
     unauthorized("Authentication required.");
   }
 
-  const byToken = await ctx.db
-    .query("userProfiles")
-    .withIndex("by_auth_user_id", (q) => q.eq("authUserId", identity.tokenIdentifier))
-    .unique();
+  for (const candidate of authIdentityCandidates(identity)) {
+    const byToken = await ctx.db
+      .query("userProfiles")
+      .withIndex("by_auth_user_id", (q) => q.eq("authUserId", candidate))
+      .unique();
 
-  if (byToken) {
-    return {
-      identity,
-      profile: {
-        _id: byToken._id,
-        email: byToken.email,
-        name: byToken.name,
-      },
-    };
+    if (byToken) {
+      return {
+        identity,
+        profile: {
+          _id: byToken._id,
+          email: byToken.email,
+          name: byToken.name,
+        },
+      };
+    }
   }
 
   const email = identity.email ?? identity.tokenIdentifier;

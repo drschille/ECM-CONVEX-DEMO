@@ -3,6 +3,39 @@ import { mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { requireActor, requireOrgRole } from "./lib/authz";
 
+function sanitizeOrgOwnerName(name: string): string {
+  const cleaned = name
+    .replace(/^https?:\/\/[^|]+\|?/, "")
+    .replace(/\|.*/, "")
+    .replace(/[^a-zA-Z0-9 _.-]/g, " ")
+    .replace(/[-_.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || "My";
+}
+
+function defaultOrganizationName(profile: { name: string }): string {
+  const owner = sanitizeOrgOwnerName(profile.name);
+  return `${owner}'s Organization`;
+}
+
+function defaultOrganizationSlugBase(profile: { email: string; name: string }): string {
+  const email = profile.email.trim().toLowerCase();
+  const emailLocal = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ? (email.split("@")[0] ?? "")
+    : "";
+  const base = (emailLocal || sanitizeOrgOwnerName(profile.name)).toLowerCase();
+  const slug = base.replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return slug || "org";
+}
+
+function looksLikeUglyAutoOrgName(name: string): boolean {
+  return (
+    name.endsWith("'s Organization") &&
+    (name.includes("convex.site|") || /^https?:\/\//.test(name) || name.includes("|"))
+  );
+}
+
 async function createOrganizationInternal(
   ctx: Parameters<typeof mutation>[0] extends never ? never : any,
   args: {
@@ -126,10 +159,19 @@ export const bootstrapDefaultOrganization = mutation({
       .withIndex("by_profile", (q) => q.eq("profileId", profile._id))
       .collect();
     if (memberships.some((m) => m.isActive)) {
-      return memberships[0]?.organizationId ?? null;
+      const first = memberships.find((m) => m.isActive) ?? memberships[0];
+      if (!first) return null;
+      const org = await ctx.db.get("organizations", first.organizationId);
+      if (org && looksLikeUglyAutoOrgName(org.name) && org.createdByProfileId === profile._id) {
+        await ctx.db.patch("organizations", org._id, {
+          name: defaultOrganizationName(profile),
+          updatedAt: Date.now(),
+        });
+      }
+      return first.organizationId;
     }
 
-    const baseSlug = profile.email.split("@")[0]?.toLowerCase().replace(/[^a-z0-9-]/g, "-") || "org";
+    const baseSlug = defaultOrganizationSlugBase(profile);
     let slug = `${baseSlug}-ecm`;
     let suffix = 1;
     while (
@@ -143,7 +185,7 @@ export const bootstrapDefaultOrganization = mutation({
     }
 
     const orgId = await createOrganizationInternal(ctx, {
-      name: `${profile.name}'s Organization`,
+      name: defaultOrganizationName(profile),
       slug,
       description: "Default ECM organization",
       profileId: profile._id,
@@ -210,6 +252,96 @@ export const updateMemberRole = mutation({
       updatedAt: Date.now(),
     });
     return membership._id;
+  },
+});
+
+export const addMemberByEmail = mutation({
+  args: {
+    organizationId: v.id("organizations"),
+    email: v.string(),
+    name: v.optional(v.string()),
+    role: v.union(
+      v.literal("admin"),
+      v.literal("engineer"),
+      v.literal("approver"),
+      v.literal("viewer"),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const { actor } = await requireOrgRole(ctx, args.organizationId, ["admin"]);
+    const email = args.email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new ConvexError({ code: "VALIDATION", message: "Invalid email address" });
+    }
+    const now = Date.now();
+    const fallbackName = email.split("@")[0] ?? "User";
+    let profile = await ctx.db
+      .query("userProfiles")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .unique();
+
+    if (!profile) {
+      const profileId = await ctx.db.insert("userProfiles", {
+        email,
+        name: args.name?.trim() || fallbackName,
+        lastSeenAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      profile = await ctx.db.get("userProfiles", profileId);
+    } else if (args.name?.trim() && profile.name !== args.name.trim()) {
+      await ctx.db.patch("userProfiles", profile._id, {
+        name: args.name.trim(),
+        updatedAt: now,
+      });
+      profile = await ctx.db.get("userProfiles", profile._id);
+    }
+
+    if (!profile) {
+      throw new ConvexError({ code: "INTERNAL", message: "Failed to provision profile" });
+    }
+
+    const existingMembership = await ctx.db
+      .query("memberships")
+      .withIndex("by_org_and_profile", (q) =>
+        q.eq("organizationId", args.organizationId).eq("profileId", profile._id),
+      )
+      .unique();
+
+    if (existingMembership) {
+      await ctx.db.patch("memberships", existingMembership._id, {
+        role: args.role,
+        isActive: true,
+        updatedAt: now,
+      });
+      return {
+        membershipId: existingMembership._id,
+        profileId: profile._id,
+        email: profile.email,
+        role: args.role,
+        created: false,
+        updated: true,
+      };
+    }
+
+    const membershipId = await ctx.db.insert("memberships", {
+      organizationId: args.organizationId,
+      profileId: profile._id,
+      role: args.role,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return {
+      membershipId,
+      profileId: profile._id,
+      email: profile.email,
+      role: args.role,
+      created: true,
+      updated: false,
+      invitedByProfileId: actor.profile._id,
+    };
   },
 });
 

@@ -14,6 +14,7 @@ export const api = {
     bootstrapDefaultOrganization: fn("organizations:bootstrapDefaultOrganization"),
     listMembers: fn("organizations:listMembers"),
     updateMemberRole: fn("organizations:updateMemberRole"),
+    addMemberByEmail: fn("organizations:addMemberByEmail"),
     getApprovalPolicy: fn("organizations:getApprovalPolicy"),
     upsertApprovalPolicy: fn("organizations:upsertApprovalPolicy"),
   },
