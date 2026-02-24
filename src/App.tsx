@@ -2,7 +2,15 @@ import { Authenticated, Unauthenticated, useConvexAuth } from "convex/react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { LoginPage } from "./pages/LoginPage";
-import { OrgScaffoldPage } from "./pages/OrgScaffoldPage";
+import { OrgDashboardPage } from "./pages/OrgDashboardPage";
+import { ItemsPage } from "./pages/ItemsPage";
+import { ChangesListPage } from "./pages/ChangesListPage";
+import { NewChangeRequestPage } from "./pages/NewChangeRequestPage";
+import { ChangeRequestDetailPage } from "./pages/ChangeRequestDetailPage";
+import { ReportsPage } from "./pages/ReportsPage";
+import { AuditPage } from "./pages/AuditPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { useBootstrapAndOrg } from "./hooks/useOrgContext";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { isLoading } = useConvexAuth();
@@ -30,7 +38,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate replace to="/login" />} />
+      <Route path="/" element={<HomeRedirect />} />
       <Route path="/login" element={<LoginPage />} />
 
       <Route
@@ -42,81 +50,53 @@ export default function App() {
         }
       >
         <Route index element={<Navigate replace to="dashboard" />} />
-        <Route
-          path="dashboard"
-          element={
-            <OrgScaffoldPage
-              title="Dashboard"
-              description="Open change requests, overdue work, and assignment views will appear here."
-            />
-          }
-        />
-        <Route
-          path="items"
-          element={
-            <OrgScaffoldPage
-              title="Items Registry"
-              description="Part and document records, search/filter, and CSV import live here."
-            />
-          }
-        />
-        <Route
-          path="changes"
-          element={
-            <OrgScaffoldPage
-              title="Change Requests"
-              description="CR list, workflow status tracking, and triage/review queues."
-            />
-          }
-        />
-        <Route
-          path="changes/new"
-          element={
-            <OrgScaffoldPage
-              title="New Change Request"
-              description="Structured CR creation form with affected items, attachments, and ownership."
-            />
-          }
-        />
-        <Route
-          path="changes/:crId"
-          element={
-            <OrgScaffoldPage
-              title="Change Request Detail"
-              description="Overview, affected items, approvals, comments, notifications, and audit history."
-            />
-          }
-        />
-        <Route
-          path="reports"
-          element={
-            <OrgScaffoldPage
-              title="Reports"
-              description="Filterable reports and CSV exports for status, owner, priority, and date ranges."
-            />
-          }
-        />
-        <Route
-          path="audit"
-          element={
-            <OrgScaffoldPage
-              title="Audit Log"
-              description="Immutable compliance events for CRUD actions, approvals, and workflow transitions."
-            />
-          }
-        />
-        <Route
-          path="settings"
-          element={
-            <OrgScaffoldPage
-              title="Organization Settings"
-              description="Members, roles, approval policies, and organization configuration (admin-only)."
-            />
-          }
-        />
+        <Route path="dashboard" element={<OrgRouteRenderer render={(orgId) => <OrgDashboardPage organizationId={orgId} />} />} />
+        <Route path="items" element={<OrgRouteRenderer render={(orgId) => <ItemsPage organizationId={orgId} />} />} />
+        <Route path="changes" element={<OrgRouteRenderer render={(orgId) => <ChangesListPage organizationId={orgId} />} />} />
+        <Route path="changes/new" element={<OrgRouteRenderer render={(orgId) => <NewChangeRequestPage organizationId={orgId} />} />} />
+        <Route path="changes/:crId" element={<OrgRouteRenderer render={(orgId) => <ChangeRequestDetailPage organizationId={orgId} />} />} />
+        <Route path="reports" element={<OrgRouteRenderer render={(orgId) => <ReportsPage organizationId={orgId} />} />} />
+        <Route path="audit" element={<OrgRouteRenderer render={(orgId) => <AuditPage organizationId={orgId} />} />} />
+        <Route path="settings" element={<OrgRouteRenderer render={(orgId) => <SettingsPage organizationId={orgId} />} />} />
       </Route>
 
       <Route path="*" element={<Navigate replace to="/login" />} />
     </Routes>
   );
+}
+
+function HomeRedirect() {
+  const { isLoading } = useConvexAuth();
+  const { myOrgs } = useBootstrapAndOrg();
+  if (isLoading) {
+    return <div className="grid min-h-screen place-items-center text-sm text-slate-600">Loading...</div>;
+  }
+  return (
+    <>
+      <Authenticated>
+        {myOrgs && myOrgs.length > 0 ? (
+          <Navigate replace to={`/org/${String(myOrgs[0].organizationId)}/dashboard`} />
+        ) : (
+          <div className="grid min-h-screen place-items-center text-sm text-slate-600">
+            Provisioning organization...
+          </div>
+        )}
+      </Authenticated>
+      <Unauthenticated>
+        <Navigate replace to="/login" />
+      </Unauthenticated>
+    </>
+  );
+}
+
+function OrgRouteRenderer({
+  render,
+}: {
+  render: (organizationId: string) => React.ReactNode;
+}) {
+  const { orgId } = useBootstrapAndOrg();
+  if (!orgId) {
+    return <div className="text-sm text-slate-500">Loading organization...</div>;
+  }
+  return <>{render(orgId)}</>;
 }

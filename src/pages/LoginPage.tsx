@@ -1,7 +1,7 @@
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useConvexAuth } from "convex/react";
 import { FormEvent, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 
 export function LoginPage() {
   const { signIn } = useAuthActions();
@@ -11,7 +11,7 @@ export function LoginPage() {
   const [pending, setPending] = useState(false);
 
   if (!isLoading && isAuthenticated) {
-    return <Navigate replace to="/org/default/dashboard" />;
+    return <Navigate replace to="/" />;
   }
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -109,10 +109,8 @@ export function LoginPage() {
           </button>
 
           <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-            After authentication, continue to a placeholder org route:{" "}
-            <Link className="font-medium text-teal-700" to="/org/default/dashboard">
-              /org/default/dashboard
-            </Link>
+            After authentication, the app bootstraps your user profile and a default organization,
+            then routes you into the ECM workspace.
           </div>
         </section>
       </div>

@@ -1,6 +1,8 @@
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useConvexAuth } from "convex/react";
+import { NotificationsPanel } from "./NotificationsPanel";
+import { useBootstrapAndOrg } from "@/hooks/useOrgContext";
 
 const nav = [
   { label: "Dashboard", to: "dashboard" },
@@ -16,7 +18,8 @@ export function AppShell() {
   const { isAuthenticated } = useConvexAuth();
   const location = useLocation();
   const orgMatch = location.pathname.match(/^\/org\/([^/]+)/);
-  const orgId = orgMatch?.[1] ?? "org";
+  const orgId = orgMatch?.[1];
+  const { myOrgs, org } = useBootstrapAndOrg();
 
   return (
     <div className="min-h-screen">
@@ -31,11 +34,9 @@ export function AppShell() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
-              to="/login"
-            >
-              Org switch
+            {orgId && <NotificationsPanel organizationId={orgId} />}
+            <Link className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50" to="/login">
+              Switch
             </Link>
             {isAuthenticated && (
               <button
@@ -54,8 +55,22 @@ export function AppShell() {
         <aside className="rounded-2xl border border-white/60 bg-white/90 p-3 shadow-sm">
           <div className="mb-3 rounded-xl bg-slate-100 px-3 py-2">
             <p className="text-xs uppercase tracking-wide text-slate-500">Organization</p>
-            <p className="text-sm font-semibold text-slate-900">{orgId}</p>
+            <p className="text-sm font-semibold text-slate-900">{org?.name ?? orgId ?? "org"}</p>
+            <p className="text-xs text-slate-500">{org?.myRole ?? ""}</p>
           </div>
+          {(myOrgs ?? []).length > 1 && (
+            <div className="mb-3 space-y-1">
+              {(myOrgs ?? []).slice(0, 4).map((entry: any) => (
+                <Link
+                  key={entry.organizationId}
+                  className="block rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+                  to={`/org/${entry.organizationId}/dashboard`}
+                >
+                  {entry.name} ({entry.role})
+                </Link>
+              ))}
+            </div>
+          )}
           <nav className="flex flex-col gap-1">
             {nav.map((item) => (
               <NavLink
