@@ -1,8 +1,8 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
 
 type SequencePrefixType = "changeRequest" | "changeNotification";
+type IntValue = bigint;
 
 const DEFAULT_SEQUENCE_PREFIXES: Record<SequencePrefixType, string> = {
     changeRequest: "P",
@@ -47,14 +47,26 @@ async function getSequencePrefix(ctx: { db: any }, sequenceType: SequencePrefixT
     return row?.prefix ?? DEFAULT_SEQUENCE_PREFIXES[sequenceType];
 }
 
-async function getStoredSequence(ctx: { db: any }, year: number) {
+function currentYearInt(): IntValue {
+    return BigInt(new Date().getFullYear());
+}
+
+function nowInt(): IntValue {
+    return BigInt(Date.now());
+}
+
+function intToNumber(value: IntValue) {
+    return Number(value);
+}
+
+async function getStoredSequence(ctx: { db: any }, year: IntValue) {
     return await ctx.db
         .query("changeRequestSequences")
         .withIndex("by_year", (q: any) => q.eq("year", year))
         .unique();
 }
 
-async function getBootstrappedLastSequence(ctx: { db: any }, year: number) {
+async function getBootstrappedLastSequence(ctx: { db: any }, year: IntValue) {
     const sequence = await getStoredSequence(ctx, year);
     if (sequence) {
         return { row: sequence, lastNumber: sequence.lastNumber };
@@ -64,22 +76,23 @@ async function getBootstrappedLastSequence(ctx: { db: any }, year: number) {
         .query("changeRequests")
         .withIndex("change_requests_by_year", (q: any) => q.eq("year", year))
         .collect();
+    const yearNumber = intToNumber(year);
     const maxExistingSequence = noticesForYear.reduce((max: number, notice: { id: string }) => {
-        const parsed = parseSequenceFromId(notice.id, year);
+        const parsed = parseSequenceFromId(notice.id, yearNumber);
         return parsed !== null ? Math.max(max, parsed) : max;
     }, 0);
 
     return { row: null, lastNumber: maxExistingSequence };
 }
 
-async function getStoredNoticeSequence(ctx: { db: any }, year: number) {
+async function getStoredNoticeSequence(ctx: { db: any }, year: IntValue) {
     return await ctx.db
         .query("changeNoticeSequences")
         .withIndex("by_year", (q: any) => q.eq("year", year))
         .unique();
 }
 
-async function getBootstrappedLastNoticeSequence(ctx: { db: any }, year: number) {
+async function getBootstrappedLastNoticeSequence(ctx: { db: any }, year: IntValue) {
     const sequence = await getStoredNoticeSequence(ctx, year);
     if (sequence) {
         return { row: sequence, lastNumber: sequence.lastNumber };
@@ -89,61 +102,43 @@ async function getBootstrappedLastNoticeSequence(ctx: { db: any }, year: number)
         .query("changeNotices")
         .withIndex("change_notices_by_year", (q: any) => q.eq("year", year))
         .collect();
+    const yearNumber = intToNumber(year);
     const maxExistingSequence = noticesForYear.reduce((max: number, notice: { id: string }) => {
-        const parsed = parseSequenceFromId(notice.id, year);
+        const parsed = parseSequenceFromId(notice.id, yearNumber);
         return parsed !== null ? Math.max(max, parsed) : max;
     }, 0);
 
     return { row: null, lastNumber: maxExistingSequence };
 }
 
-async function requireUserIdentity(ctx: { auth: any }) {
-    const user = await ctx.auth.getUserIdentity();
-    if (!user) {
-        throw new Error("Unauthorized");
-    }
-    return user;
-}
-
-function formatActorName(user: { name?: string | null; email?: string | null; subject?: string | null }) {
-    return user.name ?? user.email ?? user.subject ?? "Unknown";
-}
-
-function getAuthorFields(user: { name?: string | null; email?: string | null; subject?: string | null }) {
-    const displayAuthor = user.name ?? user.email ?? "Unknown";
+function getAuthorFields(user?: { name?: string | null; email?: string | null; subject?: string | null }) {
+    const displayAuthor = user?.name ?? user?.email ?? "Anonymous";
     return {
         author: displayAuthor,
-        authorName: user.name ?? undefined,
-        authorEmail: user.email ?? undefined,
+        authorName: user?.name ?? undefined,
+        authorEmail: user?.email ?? undefined,
     };
 }
 
-async function getCurrentAuthorFields(ctx: { auth: any; db: any }) {
-    const identity = await requireUserIdentity(ctx);
-    const userId = await getAuthUserId(ctx as any);
-    const userRecord = userId ? await ctx.db.get("users", userId) : null;
-
-    return getAuthorFields({
-        name: userRecord?.name ?? identity.name ?? undefined,
-        email: userRecord?.email ?? identity.email ?? undefined,
-        subject: identity.subject ?? undefined,
-    });
+async function getCurrentAuthorFields(_ctx: { db: any }) {
+    return getAuthorFields();
 }
 
 async function createChangeNoticeWithNextId(
     ctx: { db: any },
-    params: { description?: string; author: string; authorName?: string; authorEmail?: string; now?: number },
+    params: { description?: string; author: string; authorName?: string; authorEmail?: string; now?: IntValue },
 ) {
-    const now = params.now ?? Date.now();
-    const year = new Date(now).getFullYear();
+    const now = params.now ?? nowInt();
+    const year = BigInt(new Date(intToNumber(now)).getFullYear());
+    const yearNumber = intToNumber(year);
     const prefix = await getSequencePrefix(ctx, "changeRequest");
     const { row: sequenceRow, lastNumber } = await getBootstrappedLastSequence(ctx, year);
     let nextNumber = lastNumber + 1;
-    let id = formatSuggestedChangeNoticeId(prefix, year, nextNumber);
+    let id = formatSuggestedChangeNoticeId(prefix, yearNumber, nextNumber);
 
     while (true) {
         if (nextNumber > 9999) {
-            throw new Error(`Change notice sequence overflow for ${year}`);
+            throw new Error(`Change notice sequence overflow for ${yearNumber}`);
         }
 
         const existing = await ctx.db
@@ -158,7 +153,7 @@ async function createChangeNoticeWithNextId(
 
         // Recover from an out-of-sync sequence row by advancing forward only.
         nextNumber += 1;
-        id = formatSuggestedChangeNoticeId(prefix, year, nextNumber);
+        id = formatSuggestedChangeNoticeId(prefix, yearNumber, nextNumber);
     }
 
     if (sequenceRow) {
@@ -188,18 +183,19 @@ async function createChangeNoticeWithNextId(
 
 async function createChangeNotificationWithNextId(
     ctx: { db: any },
-    params: { description?: string; author: string; authorName?: string; authorEmail?: string; now?: number },
+    params: { description?: string; author: string; authorName?: string; authorEmail?: string; now?: IntValue },
 ) {
-    const now = params.now ?? Date.now();
-    const year = new Date(now).getFullYear();
+    const now = params.now ?? nowInt();
+    const year = BigInt(new Date(intToNumber(now)).getFullYear());
+    const yearNumber = intToNumber(year);
     const prefix = await getSequencePrefix(ctx, "changeNotification");
     const { row: sequenceRow, lastNumber } = await getBootstrappedLastNoticeSequence(ctx, year);
     let nextNumber = lastNumber + 1;
-    let id = formatSuggestedChangeNoticeId(prefix, year, nextNumber);
+    let id = formatSuggestedChangeNoticeId(prefix, yearNumber, nextNumber);
 
     while (true) {
         if (nextNumber > 9999) {
-            throw new Error(`Change notice sequence overflow for ${year}`);
+            throw new Error(`Change notice sequence overflow for ${yearNumber}`);
         }
 
         const existing = await ctx.db
@@ -213,7 +209,7 @@ async function createChangeNotificationWithNextId(
         }
 
         nextNumber += 1;
-        id = formatSuggestedChangeNoticeId(prefix, year, nextNumber);
+        id = formatSuggestedChangeNoticeId(prefix, yearNumber, nextNumber);
     }
 
     if (sequenceRow) {
@@ -241,53 +237,47 @@ async function createChangeNotificationWithNextId(
     return { noticeId, id, year };
 }
 
-export const changeNotices = query({
-    args: { year: v.optional(v.number()) },
+export const changeRequests = query({
+    args: { year: v.optional(v.int64()) },
     handler: async (ctx, args) => {
-       
-        // Default to the current year if no year is provided
-        const year = args.year ?? new Date().getFullYear();
-
-        const notices = await ctx.db
+        const year = args.year ?? currentYearInt();
+        return await ctx.db
             .query("changeRequests")
-            .withIndex("change_requests_by_year", (q) =>
-                q.eq("year", year)
-            )
+            .withIndex("change_requests_by_year", (q: any) => q.eq("year", year))
             .order("asc")
             .take(100);
-        return notices;
     },
 });
 
 export const nextChangeNoticeId = query({
-    args: { year: v.optional(v.number()) },
+    args: { year: v.optional(v.int64()) },
     handler: async (ctx, args) => {
-        const year = args.year ?? new Date().getFullYear();
+        const year = args.year ?? currentYearInt();
         const prefix = await getSequencePrefix(ctx, "changeRequest");
         const { lastNumber } = await getBootstrappedLastSequence(ctx, year);
-        return formatSuggestedChangeNoticeId(prefix, year, lastNumber + 1);
+        return formatSuggestedChangeNoticeId(prefix, intToNumber(year), lastNumber + 1);
     },
 });
 
-export const changeNotifications = query({
-    args: { year: v.optional(v.number()) },
+export const changeNotices = query({
+    args: { year: v.optional(v.int64()) },
     handler: async (ctx, args) => {
-        const year = args.year ?? new Date().getFullYear();
+        const year = args.year ?? currentYearInt();
         return await ctx.db
             .query("changeNotices")
-            .withIndex("change_notices_by_year", (q) => q.eq("year", year))
+            .withIndex("change_notices_by_year", (q: any) => q.eq("year", year))
             .order("asc")
             .take(100);
     },
 });
 
 export const nextChangeNotificationId = query({
-    args: { year: v.optional(v.number()) },
+    args: { year: v.optional(v.int64()) },
     handler: async (ctx, args) => {
-        const year = args.year ?? new Date().getFullYear();
+        const year = args.year ?? currentYearInt();
         const prefix = await getSequencePrefix(ctx, "changeNotification");
         const { lastNumber } = await getBootstrappedLastNoticeSequence(ctx, year);
-        return formatSuggestedChangeNoticeId(prefix, year, lastNumber + 1);
+        return formatSuggestedChangeNoticeId(prefix, intToNumber(year), lastNumber + 1);
     },
 });
 
@@ -312,11 +302,10 @@ export const updateSequencePrefix = mutation({
         prefix: v.string(),
     },
     handler: async (ctx, args) => {
-        const identity = await requireUserIdentity(ctx);
         const normalizedPrefix = normalizeSequencePrefix(args.prefix);
         const row = await getSequencePrefixRow(ctx, args.sequenceType);
-        const updatedAt = Date.now();
-        const updatedBy = identity.email ?? identity.name ?? identity.subject ?? "unknown";
+        const updatedAt = nowInt();
+        const updatedBy = "anonymous";
 
         if (row) {
             await ctx.db.patch("sequencePrefixSettings", row._id, {
@@ -342,7 +331,6 @@ export const addChangeNotice = mutation({
         description: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        await requireUserIdentity(ctx);
         const authorFields = await getCurrentAuthorFields(ctx);
         const created = await createChangeNoticeWithNextId(ctx, {
             description: args.description,
@@ -357,7 +345,6 @@ export const addChangeNotification = mutation({
         description: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        await requireUserIdentity(ctx);
         const authorFields = await getCurrentAuthorFields(ctx);
         const created = await createChangeNotificationWithNextId(ctx, {
             description: args.description,
@@ -388,8 +375,6 @@ export const addChangeNoticeTarget = mutation({
         plannedRevisionTo: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        await requireUserIdentity(ctx);
-
         const notice = await ctx.db.get("changeRequests", args.changeNoticeId);
         if (!notice) {
             throw new Error("Change notice not found");
@@ -490,7 +475,6 @@ export const impactAnalysisSuggestionsForEcn = query({
 export const runImpactAnalysisForEcn = mutation({
     args: { changeNoticeId: v.id("changeRequests") },
     handler: async (ctx, args) => {
-        await requireUserIdentity(ctx);
         const notice = await ctx.db.get("changeRequests", args.changeNoticeId);
         if (!notice) {
             throw new Error("Change notice not found");
@@ -528,7 +512,7 @@ export const runImpactAnalysisForEcn = mutation({
         const visitedProductItemIds = new Set<string>();
         let created = 0;
         let skippedDuplicates = 0;
-        const now = Date.now();
+        const now = nowInt();
 
         while (queuedProductItemIds.length > 0) {
             const productItemIdString = queuedProductItemIds.shift();
@@ -632,7 +616,6 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
         description: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
-        const user = await requireUserIdentity(ctx);
         const authorFields = await getCurrentAuthorFields(ctx);
         const suggestion = await ctx.db.get("requestImpactAnalysisSuggestions", args.suggestionId);
         if (!suggestion) {
@@ -650,7 +633,7 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
             throw new Error("Parent change notice not found");
         }
 
-        const now = Date.now();
+        const now = nowInt();
         const created = await createChangeNoticeWithNextId(ctx, {
             description:
                 args.description ??
@@ -665,7 +648,7 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
             childChangeRequestId: created.noticeId,
             reason: "follow_up_for_subassembly",
             createdAt: now,
-            createdBy: formatActorName(user),
+            createdBy: "Anonymous",
         });
 
         if (suggestion.suggestedItemId) {
@@ -682,7 +665,7 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
             status: "accepted",
             createdChangeRequestId: created.noticeId,
             resolvedAt: now,
-            resolvedBy: formatActorName(user),
+            resolvedBy: "Anonymous",
         });
 
         return {
@@ -692,19 +675,17 @@ export const acceptSuggestionCreateFollowUpEcn = mutation({
     },
 });
 
-export const startChangeNotice = mutation({
-    args: { noticeId: v.id("changeRequests") },
+export const startChangeRequest = mutation({
+    args: { requestId: v.id("changeRequests") },
     handler: async (ctx, args) => {
-        await requireUserIdentity(ctx);
-
-        const notice = await ctx.db.get("changeRequests", args.noticeId);
-        if (!notice) {
-            throw new Error("Change notice not found");
+        const request = await ctx.db.get("changeRequests", args.requestId);
+        if (!request) {
+            throw new Error("Change request not found");
         }
-        if (notice.state !== "proposed") {
-            throw new Error("Only proposed change notices can be started");
+        if (request.state !== "proposed") {
+            throw new Error("Only proposed change requests can be started");
         }
 
-        await ctx.db.patch("changeRequests", args.noticeId, { state: "started" });
+        await ctx.db.patch("changeRequests", args.requestId, { state: "started" });
     },
 });

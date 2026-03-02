@@ -1,20 +1,15 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { authTables } from "@convex-dev/auth/server";
 
-// The schema is normally optional, but Convex Auth
-// requires indexes defined on `authTables`.
-// The schema provides more precise TypeScript types.
 export default defineSchema({
-  ...authTables,
   changeNotices: defineTable({
     id: v.string(),
     author: v.string(),
     authorName: v.optional(v.string()),
     authorEmail: v.optional(v.string()),
     description: v.string(),
-    timestamp: v.number(),
-    year: v.number(),
+    timestamp: v.int64(),
+    year: v.int64(),
     state: v.union(
       v.literal("proposed"),
       v.literal("started"),
@@ -28,8 +23,8 @@ export default defineSchema({
     authorName: v.optional(v.string()),
     authorEmail: v.optional(v.string()),
     description: v.string(),
-    timestamp: v.number(),
-    year: v.number(),
+    timestamp: v.int64(),
+    year: v.int64(),
     state: v.union(
       v.literal("proposed"),
       v.literal("started"),
@@ -38,11 +33,11 @@ export default defineSchema({
     ),
   }).index("change_requests_by_year", ["year", "id", "timestamp"]),
   changeRequestSequences: defineTable({
-    year: v.number(),
+    year: v.int64(),
     lastNumber: v.number(),
   }).index("by_year", ["year"]),
   changeNoticeSequences: defineTable({
-    year: v.number(),
+    year: v.int64(),
     lastNumber: v.number(),
   }).index("by_year", ["year"]),
   sequencePrefixSettings: defineTable({
@@ -51,7 +46,7 @@ export default defineSchema({
       v.literal("changeNotification"),
     ),
     prefix: v.string(),
-    updatedAt: v.number(),
+    updatedAt: v.int64(),
     updatedBy: v.string(),
   }).index("by_sequence_type", ["sequenceType"]),
   changeRequestTargets: defineTable({
@@ -86,7 +81,7 @@ export default defineSchema({
       v.literal("split_scope"),
       v.literal("related"),
     ),
-    createdAt: v.number(),
+    createdAt: v.int64(),
     createdBy: v.optional(v.string()),
     notes: v.optional(v.string()),
   })
@@ -113,8 +108,8 @@ export default defineSchema({
       v.literal("superseded"),
     ),
     createdChangeRequestId: v.optional(v.id("changeRequests")),
-    createdAt: v.number(),
-    resolvedAt: v.optional(v.number()),
+    createdAt: v.int64(),
+    resolvedAt: v.optional(v.int64()),
     resolvedBy: v.optional(v.string()),
   })
     .index("by_change_request", ["changeRequestId", "status"])

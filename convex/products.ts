@@ -5,14 +5,6 @@ function requireString(value: string | undefined, fallback: string) {
   return value && value.trim() ? value.trim() : fallback;
 }
 
-async function requireUserIdentity(ctx: { auth: any }) {
-  const user = await ctx.auth.getUserIdentity();
-  if (!user) {
-    throw new Error("Unauthorized");
-  }
-  return user;
-}
-
 async function upsertItemByPartNumber(
   ctx: { db: any },
   args: {
@@ -106,8 +98,6 @@ export const addProduct = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    await requireUserIdentity(ctx);
-
     const existing = await ctx.db
       .query("products")
       .withIndex("by_product_number", (q) => q.eq("productNumber", args.productNumber))
@@ -168,7 +158,6 @@ export const importProductBomFromPdmPlaceholder = mutation({
     mode: v.optional(v.union(v.literal("preview"), v.literal("upsert"))),
   },
   handler: async (ctx, args) => {
-    await requireUserIdentity(ctx);
     const mode = args.mode ?? "preview";
 
     const normalizedBom = [];

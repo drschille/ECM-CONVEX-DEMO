@@ -17,7 +17,7 @@ export default function ResourceCard({
   description: string;
   state: ChangeNoticeState;
   author: string;
-  timestamp: number;
+  timestamp: number | bigint;
   isClickable: boolean;
   canOpenWorkspace: boolean;
   isBusy: boolean;
@@ -95,7 +95,7 @@ export default function ResourceCard({
         </p>
         <p className="col-span-2 truncate">
           <span className="text-slate-500 dark:text-slate-400">Created:</span>{" "}
-          {new Date(timestamp).toLocaleString()}
+          {new Date(Number(timestamp)).toLocaleString()}
         </p>
         {isClickable && (
           <p className="col-span-2 font-medium text-slate-700 dark:text-slate-200">

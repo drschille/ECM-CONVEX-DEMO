@@ -1,13 +1,6 @@
 "use client";
 
-import { useAuthActions } from "@convex-dev/auth/react";
-import {
-  Authenticated,
-  Unauthenticated,
-  useConvexAuth,
-  useMutation,
-  useQuery,
-} from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useEffect, useState } from "react";
 import { api } from "../convex/_generated/api";
 import NavRailButton from "./components/NavRailButton";
@@ -33,122 +26,24 @@ export default function App() {
               Engineering Change Management
             </p>
           </div>
-          <SignOutButton />
         </div>
       </header>
       <main className="mx-auto flex w-full max-w-[1800px] flex-col gap-8 px-4 py-8">
-        <Authenticated>
-          <Content />
-        </Authenticated>
-        <Unauthenticated>
-          <SignInForm />
-        </Unauthenticated>
+        <Content />
       </main>
     </>
   );
 }
 
-function SignOutButton() {
-  const { isAuthenticated } = useConvexAuth();
-  const { signOut } = useAuthActions();
-
-  if (!isAuthenticated) {
-    return null;
-  }
-
-  return (
-    <button
-      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-      onClick={() => void signOut()}
-      type="button"
-    >
-      Sign out
-    </button>
-  );
-}
-
-function SignInForm() {
-  const { signIn } = useAuthActions();
-  const [flow, setFlow] = useState<"signIn" | "signUp">("signIn");
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <div className="mx-auto w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="mb-5">
-        <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
-          Engineering Change Notices
-        </h1>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Sign in to view and submit change notices.
-        </p>
-      </div>
-
-      <form
-        className="flex flex-col gap-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const formData = new FormData(e.target as HTMLFormElement);
-          formData.set("flow", flow);
-          void signIn("password", formData).catch((signInError) => {
-            setError(signInError.message);
-          });
-        }}
-      >
-        <input
-          className="rounded-md border border-slate-300 bg-white p-2 text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-          type="email"
-          name="email"
-          placeholder="Email"
-        />
-        <input
-          className="rounded-md border border-slate-300 bg-white p-2 text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-          type="password"
-          name="password"
-          placeholder="Password"
-        />
-        <button
-          className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
-          type="submit"
-        >
-          {flow === "signIn" ? "Sign in" : "Sign up"}
-        </button>
-
-        <div className="flex flex-row gap-2 text-sm text-slate-700 dark:text-slate-300">
-          <span>
-            {flow === "signIn"
-              ? "Don't have an account?"
-              : "Already have an account?"}
-          </span>
-          <button
-            className="underline hover:no-underline"
-            onClick={() => setFlow(flow === "signIn" ? "signUp" : "signIn")}
-            type="button"
-          >
-            {flow === "signIn" ? "Sign up instead" : "Sign in instead"}
-          </button>
-        </div>
-
-        {error && (
-          <div className="rounded-md border border-red-500/40 bg-red-500/10 p-2">
-            <p className="font-mono text-xs text-red-900 dark:text-red-100">
-              Error signing in: {error}
-            </p>
-          </div>
-        )}
-      </form>
-    </div>
-  );
-}
-
 function Content() {
-  const requests = useQuery(api.changes.changeNotices, {}) ?? [];
-  const notifications = useQuery(api.changes.changeNotifications, {}) ?? [];
+  const requests = useQuery(api.changes.changeRequests, {}) ?? [];
+  const notifications = useQuery(api.changes.changeNotices, {}) ?? [];
   const suggestedRequestId = useQuery(api.changes.nextChangeNoticeId, {});
   const suggestedNotificationId = useQuery(api.changes.nextChangeNotificationId, {});
   const sequencePrefixes = useQuery(api.changes.sequencePrefixSettings, {});
   const addChangeRequest = useMutation(api.changes.addChangeNotice);
   const addChangeNotification = useMutation(api.changes.addChangeNotification);
-  const startChangeNotice = useMutation(api.changes.startChangeNotice);
+  const startChangeNotice = useMutation(api.changes.startChangeRequest);
   const updateSequencePrefix = useMutation(api.changes.updateSequencePrefix);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -342,7 +237,7 @@ function Content() {
 
     setStartingNoticeId(String(selectedRequest._id));
     try {
-      await startChangeNotice({ noticeId: selectedRequest._id });
+      await startChangeNotice({ requestId: selectedRequest._id });
     } catch (error) {
       window.alert(
         error instanceof Error ? error.message : "Failed to start change request.",
