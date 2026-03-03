@@ -1,13 +1,8 @@
 import { useMutation, useQuery } from "convex/react";
 import { useState } from "react";
 import { api } from "../../../convex/_generated/api";
-import type {
-  EcnRoutingRow,
-  EcnTaskRouteTemplate,
-  EcnWorkGroup,
-  EcnWorkGroupAssignment,
-} from "./types";
-import { makeLocalId, parseTaskListInput } from "./utils";
+import type { EcnTaskRouteTemplate, EcnWorkGroup } from "./types";
+import { parseTaskListInput } from "./utils";
 
 type ChangeNoticeState = "proposed" | "started" | "completed" | "cancelled";
 
@@ -50,6 +45,10 @@ export default function EcnWorkspace({
     api.changes.changeNoticeLinksForEcn,
     isEcrWorkspace ? { changeNoticeId: notice._id as never } : "skip",
   );
+  const persistedEcnRoutingMatrix = useQuery(
+    api.changes.changeNoticeRoutingMatrix,
+    !isEcrWorkspace ? { changeNoticeId: notice._id as never } : "skip",
+  );
   const items = useQuery(api.products.listItems, {}) ?? [];
   const products = useQuery(api.products.listProducts, {}) ?? [];
 
@@ -57,6 +56,10 @@ export default function EcnWorkspace({
   const runImpactAnalysis = useMutation(api.changes.runImpactAnalysisForEcn);
   const acceptFollowUp = useMutation(api.changes.acceptSuggestionCreateFollowUpEcn);
   const importPdmProduct = useMutation(api.products.importProductBomFromPdmPlaceholder);
+  const ensureProductForRouting = useMutation(api.products.ensureProductForRouting);
+  const addChangeNoticeRoutingItem = useMutation(api.changes.addChangeNoticeRoutingItem);
+  const removeChangeNoticeRoutingItem = useMutation(api.changes.removeChangeNoticeRoutingItem);
+  const setChangeNoticeRoutingAssignment = useMutation(api.changes.setChangeNoticeRoutingAssignment);
 
   const [selectedProductNumber, setSelectedProductNumber] = useState("");
   const [targetRole, setTargetRole] = useState<"direct" | "impacted" | "candidate">("direct");
@@ -111,11 +114,17 @@ export default function EcnWorkspace({
   const [pdmResult, setPdmResult] = useState<string | null>(null);
   const [isPdmImportOpen, setIsPdmImportOpen] = useState(false);
   const workspaceLabel = workspaceKind === "ecr" ? "ECR Workspace" : "ECN Workspace";
-  const [ecnRoutingRows, setEcnRoutingRows] = useState<EcnRoutingRow[]>([]);
-  const [selectedEcnRoutingItemId, setSelectedEcnRoutingItemId] = useState("");
-  const [ecnAssignments, setEcnAssignments] = useState<
-    Record<string, Record<string, EcnWorkGroupAssignment>>
-  >({});
+  const [routingProductNumber, setRoutingProductNumber] = useState("");
+  const [isCreateRoutingProductOpen, setIsCreateRoutingProductOpen] = useState(false);
+  const [createRoutingProductDraft, setCreateRoutingProductDraft] = useState({
+    productNumber: "",
+    drawingNumber: "",
+    revision: "",
+    name: "",
+    description: "",
+  });
+  const [createRoutingProductError, setCreateRoutingProductError] = useState<string | null>(null);
+  const [isCreatingRoutingProduct, setIsCreatingRoutingProduct] = useState(false);
 
   const productOptions = products
     .map((product) => {
@@ -129,67 +138,140 @@ export default function EcnWorkspace({
       };
     })
     .filter((entry) => entry.item);
-  const ecnAssignableItems = items
-    .slice()
-    .sort((a, b) => a.partNumber.localeCompare(b.partNumber));
-
   const getTaskRouteTemplate = (templateId: string) =>
     ecnTaskRouteTemplates.find((template) => template.id === templateId) ?? null;
 
-  const getEcnAssignment = (rowId: string, workGroupId: string): EcnWorkGroupAssignment =>
-    ecnAssignments[rowId]?.[workGroupId] ?? { required: false, templateId: "", tasks: [] };
+  const getEcnAssignment = (itemId: string, workGroupId: string) =>
+    persistedEcnRoutingMatrix?.assignmentByRowAndGroup?.[`${itemId}:${workGroupId}`] ?? {
+      required: false,
+      templateId: "",
+      tasks: [],
+    };
 
-  const updateEcnAssignment = (
-    rowId: string,
-    workGroupId: string,
-    updater: (current: EcnWorkGroupAssignment) => EcnWorkGroupAssignment,
-  ) => {
-    setEcnAssignments((current) => {
-      const rowAssignments = current[rowId] ?? {};
-      const nextCell = updater(rowAssignments[workGroupId] ?? { required: false, templateId: "", tasks: [] });
-      return {
-        ...current,
-        [rowId]: {
-          ...rowAssignments,
-          [workGroupId]: nextCell,
-        },
-      };
+  const addRoutingRowByItemId = async (itemId: string) => {
+    await addChangeNoticeRoutingItem({
+      changeNoticeId: notice._id as never,
+      itemId: itemId as never,
     });
   };
 
-  const handleAddEcnRoutingRow = () => {
-    if (!selectedEcnRoutingItemId) {
+  const handleAddEcnRoutingRow = async () => {
+    const normalizedProductNumber = routingProductNumber.trim().toUpperCase();
+    if (!normalizedProductNumber) {
       return;
     }
-    const item = items.find((candidate) => String(candidate._id) === selectedEcnRoutingItemId);
-    if (!item) {
-      return;
-    }
-    setEcnRoutingRows((current) => {
-      if (current.some((row) => row.itemId === selectedEcnRoutingItemId)) {
-        return current;
+
+    const existingProduct = products.find(
+      (candidate) => candidate.productNumber.trim().toUpperCase() === normalizedProductNumber,
+    );
+
+    try {
+      if (existingProduct) {
+        const productItem = items.find(
+          (candidate) =>
+            candidate.itemType === "product" &&
+            candidate.partNumber.trim().toUpperCase() === normalizedProductNumber,
+        );
+        if (productItem) {
+          await addRoutingRowByItemId(String(productItem._id));
+          setRoutingProductNumber("");
+          return;
+        }
+
+        const ensured = await ensureProductForRouting({
+          productNumber: existingProduct.productNumber,
+          drawingNumber: existingProduct.drawingNumber,
+          revision: existingProduct.revision,
+          name: existingProduct.name,
+          description: undefined,
+        });
+        await addRoutingRowByItemId(String(ensured.itemId));
+        setRoutingProductNumber("");
+        return;
       }
-      return [
-        ...current,
-        {
-          id: makeLocalId("row"),
-          itemId: String(item._id),
-          partNumber: item.partNumber,
-          name: item.name,
-          itemType: item.itemType,
-        },
-      ];
-    });
-    setSelectedEcnRoutingItemId("");
+
+      setCreateRoutingProductDraft({
+        productNumber: normalizedProductNumber,
+        drawingNumber: "",
+        revision: "",
+        name: normalizedProductNumber,
+        description: "",
+      });
+      setCreateRoutingProductError(null);
+      setIsCreateRoutingProductOpen(true);
+    } catch (error) {
+      setAnalysisStatus(error instanceof Error ? error.message : "Failed to add routing row.");
+    }
   };
 
-  const handleRemoveEcnRoutingRow = (rowId: string) => {
-    setEcnRoutingRows((current) => current.filter((row) => row.id !== rowId));
-    setEcnAssignments((current) => {
-      const next = { ...current };
-      delete next[rowId];
-      return next;
-    });
+  const handleCreateRoutingProduct = async () => {
+    const productNumber = createRoutingProductDraft.productNumber.trim().toUpperCase();
+    const drawingNumber = createRoutingProductDraft.drawingNumber.trim();
+    const revision = createRoutingProductDraft.revision.trim();
+    const name = createRoutingProductDraft.name.trim();
+
+    if (!productNumber || !drawingNumber || !revision || !name) {
+      setCreateRoutingProductError("Product number, drawing number, revision, and name are required.");
+      return;
+    }
+
+    setCreateRoutingProductError(null);
+    setIsCreatingRoutingProduct(true);
+    try {
+      const ensured = await ensureProductForRouting({
+        productNumber,
+        drawingNumber,
+        revision,
+        name,
+        description: createRoutingProductDraft.description.trim() || undefined,
+      });
+      await addRoutingRowByItemId(String(ensured.itemId));
+      setRoutingProductNumber("");
+      setIsCreateRoutingProductOpen(false);
+      setAnalysisStatus(
+        ensured.created
+          ? `Created product ${productNumber} and added it to routing.`
+          : `Added ${productNumber} to routing.`,
+      );
+    } catch (error) {
+      setCreateRoutingProductError(
+        error instanceof Error ? error.message : "Failed to create product.",
+      );
+    } finally {
+      setIsCreatingRoutingProduct(false);
+    }
+  };
+
+  const handleRemoveEcnRoutingRow = async (itemId: string) => {
+    try {
+      await removeChangeNoticeRoutingItem({
+        changeNoticeId: notice._id as never,
+        itemId: itemId as never,
+      });
+    } catch (error) {
+      setAnalysisStatus(error instanceof Error ? error.message : "Failed to remove routing row.");
+    }
+  };
+
+  const saveRoutingAssignment = async (
+    itemId: string,
+    group: EcnWorkGroup,
+    next: { required: boolean; templateId: string; tasks: string[] },
+  ) => {
+    try {
+      await setChangeNoticeRoutingAssignment({
+        changeNoticeId: notice._id as never,
+        itemId: itemId as never,
+        workGroupId: group.id,
+        workGroupName: group.name || undefined,
+        workGroupOwner: group.owner || undefined,
+        required: next.required,
+        templateId: next.templateId || undefined,
+        tasks: next.tasks,
+      });
+    } catch (error) {
+      setAnalysisStatus(error instanceof Error ? error.message : "Failed to save assignment.");
+    }
   };
 
   const handleAddProductTarget = async () => {
@@ -370,31 +452,24 @@ export default function EcnWorkspace({
             templated, then adjusted per item.
           </p>
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/60 dark:bg-amber-900/10 dark:text-amber-100">
-            Prototype UI only: work groups, templates, and routing assignments are currently local
-            to this workspace view and not persisted yet.
+            Persisted data: rows and task assignments are saved per ECN and loaded when reopened.
           </div>
 
           <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-end">
             <label className="flex-1 text-sm">
               <span className="mb-1 block text-slate-700 dark:text-slate-200">
-                Add part/product row
+                Add product row by product number
               </span>
-              <select
+              <input
                 className="w-full rounded-md border border-slate-300 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
-                onChange={(e) => setSelectedEcnRoutingItemId(e.target.value)}
-                value={selectedEcnRoutingItemId}
-              >
-                <option value="">Select item...</option>
-                {ecnAssignableItems.map((item) => (
-                  <option key={String(item._id)} value={String(item._id)}>
-                    {item.partNumber} - {item.name} ({item.itemType})
-                  </option>
-                ))}
-              </select>
+                onChange={(e) => setRoutingProductNumber(e.target.value)}
+                placeholder="e.g. ASM-1000"
+                value={routingProductNumber}
+              />
             </label>
             <button
               className="rounded-md bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900"
-              onClick={handleAddEcnRoutingRow}
+              onClick={() => void handleAddEcnRoutingRow()}
               type="button"
             >
               Add Row
@@ -410,10 +485,13 @@ export default function EcnWorkspace({
                   </th>
                   {ecnWorkGroups.map((group) => (
                     <th
-                      className="min-w-64 border border-slate-200 bg-slate-100 px-3 py-2 font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+                      className="h-44 min-w-14 border border-slate-200 bg-slate-100 px-2 py-2 align-bottom font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
                       key={group.id}
                     >
-                      <div className="flex flex-col">
+                      <div
+                        className="[text-orientation:mixed] mx-auto flex h-full flex-col items-center justify-end gap-1 whitespace-nowrap [writing-mode:vertical-rl]"
+                        title={`${group.name || "Unnamed group"} - Owner: ${group.owner || "Unassigned"}`}
+                      >
                         <span>{group.name || "Unnamed group"}</span>
                         <span className="text-[11px] font-normal text-slate-500 dark:text-slate-400">
                           Owner: {group.owner || "Unassigned"}
@@ -424,7 +502,7 @@ export default function EcnWorkspace({
                 </tr>
               </thead>
               <tbody>
-                {ecnRoutingRows.length === 0 && (
+                {(persistedEcnRoutingMatrix?.rows.length ?? 0) === 0 && (
                   <tr>
                     <td
                       className="border border-slate-200 px-3 py-4 text-slate-500 dark:border-slate-800 dark:text-slate-400"
@@ -434,7 +512,7 @@ export default function EcnWorkspace({
                     </td>
                   </tr>
                 )}
-                {ecnRoutingRows.map((row) => (
+                {(persistedEcnRoutingMatrix?.rows ?? []).map((row) => (
                   <tr key={row.id}>
                     <td className="sticky left-0 z-[1] border border-slate-200 bg-white px-3 py-2 align-top dark:border-slate-800 dark:bg-slate-900">
                       <div className="flex items-start justify-between gap-2">
@@ -449,7 +527,7 @@ export default function EcnWorkspace({
                         </div>
                         <button
                           className="rounded border border-slate-300 px-2 py-0.5 text-[11px] hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-                          onClick={() => handleRemoveEcnRoutingRow(row.id)}
+                          onClick={() => void handleRemoveEcnRoutingRow(row.itemId)}
                           type="button"
                         >
                           Remove
@@ -457,7 +535,7 @@ export default function EcnWorkspace({
                       </div>
                     </td>
                     {ecnWorkGroups.map((group) => {
-                      const assignment = getEcnAssignment(row.id, group.id);
+                      const assignment = getEcnAssignment(row.itemId, group.id);
                       return (
                         <td
                           className="border border-slate-200 px-3 py-2 align-top dark:border-slate-800"
@@ -466,26 +544,33 @@ export default function EcnWorkspace({
                           <label className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
                             <input
                               checked={assignment.required}
-                              onChange={(e) => {
+                              onChange={(e) => void (async () => {
                                 const checked = e.target.checked;
-                                updateEcnAssignment(row.id, group.id, (current) => {
-                                  if (!checked) {
-                                    return { ...current, required: false };
-                                  }
-                                  if (current.templateId || current.tasks.length > 0) {
-                                    return { ...current, required: true };
-                                  }
-                                  const templateId = group.defaultTemplateId;
-                                  const template = templateId
-                                    ? getTaskRouteTemplate(templateId)
-                                    : null;
-                                  return {
+                                if (!checked) {
+                                  await saveRoutingAssignment(row.itemId, group, {
+                                    required: false,
+                                    templateId: "",
+                                    tasks: [],
+                                  });
+                                  return;
+                                }
+                                if (assignment.templateId || assignment.tasks.length > 0) {
+                                  await saveRoutingAssignment(row.itemId, group, {
+                                    ...assignment,
                                     required: true,
-                                    templateId: template?.id ?? "",
-                                    tasks: template?.tasks ?? [],
-                                  };
+                                  });
+                                  return;
+                                }
+                                const templateId = group.defaultTemplateId;
+                                const template = templateId
+                                  ? getTaskRouteTemplate(templateId)
+                                  : null;
+                                await saveRoutingAssignment(row.itemId, group, {
+                                  required: true,
+                                  templateId: template?.id ?? "",
+                                  tasks: template?.tasks ?? [],
                                 });
-                              }}
+                              })()}
                               type="checkbox"
                             />
                             Required
@@ -498,18 +583,15 @@ export default function EcnWorkspace({
                             <select
                               className="w-full rounded-md border border-slate-300 bg-white p-1.5 text-xs disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950"
                               disabled={!assignment.required}
-                              onChange={(e) => {
+                              onChange={(e) => void (async () => {
                                 const templateId = e.target.value;
-                                updateEcnAssignment(row.id, group.id, (current) => {
-                                  const template = getTaskRouteTemplate(templateId);
-                                  return {
-                                    ...current,
-                                    required: current.required,
-                                    templateId,
-                                    tasks: template ? [...template.tasks] : current.tasks,
-                                  };
+                                const template = getTaskRouteTemplate(templateId);
+                                await saveRoutingAssignment(row.itemId, group, {
+                                  required: assignment.required,
+                                  templateId,
+                                  tasks: template ? [...template.tasks] : assignment.tasks,
                                 });
-                              }}
+                              })()}
                               value={assignment.templateId}
                             >
                               <option value="">None</option>
@@ -528,14 +610,16 @@ export default function EcnWorkspace({
                             <input
                               className="w-full rounded-md border border-slate-300 bg-white p-1.5 text-xs disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950"
                               disabled={!assignment.required}
-                              onChange={(e) =>
-                                updateEcnAssignment(row.id, group.id, (current) => ({
-                                  ...current,
+                              defaultValue={assignment.tasks.join(", ")}
+                              key={`${row.id}-${group.id}-${assignment.tasks.join("|")}`}
+                              onBlur={(e) =>
+                                void saveRoutingAssignment(row.itemId, group, {
+                                  required: assignment.required,
+                                  templateId: assignment.templateId,
                                   tasks: parseTaskListInput(e.target.value),
-                                }))
+                                })
                               }
                               placeholder="e.g. Review drawing, Approve"
-                              value={assignment.tasks.join(", ")}
                             />
                           </label>
 
@@ -758,6 +842,133 @@ export default function EcnWorkspace({
         </div>
       </div>
     </section>
+
+    {isCreateRoutingProductOpen && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+        onClick={() => setIsCreateRoutingProductOpen(false)}
+        role="presentation"
+      >
+        <div
+          className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-800 dark:bg-slate-900"
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-routing-product-title"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3
+                className="text-lg font-semibold text-slate-900 dark:text-slate-100"
+                id="create-routing-product-title"
+              >
+                Create Product
+              </h3>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                Product not found. Fill in the product data to add it to this change notice.
+              </p>
+            </div>
+            <button
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+              onClick={() => setIsCreateRoutingProductOpen(false)}
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+              <span className="text-slate-700 dark:text-slate-200">Product number</span>
+              <input
+                className="rounded-md border border-slate-300 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
+                onChange={(e) =>
+                  setCreateRoutingProductDraft((current) => ({
+                    ...current,
+                    productNumber: e.target.value,
+                  }))
+                }
+                value={createRoutingProductDraft.productNumber}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-slate-700 dark:text-slate-200">Drawing number</span>
+              <input
+                className="rounded-md border border-slate-300 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
+                onChange={(e) =>
+                  setCreateRoutingProductDraft((current) => ({
+                    ...current,
+                    drawingNumber: e.target.value,
+                  }))
+                }
+                value={createRoutingProductDraft.drawingNumber}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-slate-700 dark:text-slate-200">Revision</span>
+              <input
+                className="rounded-md border border-slate-300 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
+                onChange={(e) =>
+                  setCreateRoutingProductDraft((current) => ({
+                    ...current,
+                    revision: e.target.value,
+                  }))
+                }
+                value={createRoutingProductDraft.revision}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+              <span className="text-slate-700 dark:text-slate-200">Name</span>
+              <input
+                className="rounded-md border border-slate-300 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
+                onChange={(e) =>
+                  setCreateRoutingProductDraft((current) => ({
+                    ...current,
+                    name: e.target.value,
+                  }))
+                }
+                value={createRoutingProductDraft.name}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+              <span className="text-slate-700 dark:text-slate-200">Description (optional)</span>
+              <textarea
+                className="min-h-24 rounded-md border border-slate-300 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
+                onChange={(e) =>
+                  setCreateRoutingProductDraft((current) => ({
+                    ...current,
+                    description: e.target.value,
+                  }))
+                }
+                value={createRoutingProductDraft.description}
+              />
+            </label>
+          </div>
+
+          {createRoutingProductError && (
+            <p className="mt-3 text-sm text-red-700 dark:text-red-300">{createRoutingProductError}</p>
+          )}
+
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+              onClick={() => setIsCreateRoutingProductOpen(false)}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="rounded-md bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900"
+              disabled={isCreatingRoutingProduct}
+              onClick={() => void handleCreateRoutingProduct()}
+              type="button"
+            >
+              {isCreatingRoutingProduct ? "Creating..." : "Create Product + Add Row"}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {isPdmImportOpen && (
       <div

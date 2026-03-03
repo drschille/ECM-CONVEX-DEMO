@@ -17,6 +17,27 @@ export default defineSchema({
       v.literal("cancelled"),
     ),
   }).index("change_notices_by_year", ["year", "id", "timestamp"]),
+  changeNoticeRoutingRows: defineTable({
+    changeNoticeId: v.id("changeNotices"),
+    itemId: v.id("items"),
+    addedAt: v.int64(),
+  })
+    .index("by_change_notice", ["changeNoticeId"])
+    .index("by_change_notice_item", ["changeNoticeId", "itemId"]),
+  changeNoticeRoutingAssignments: defineTable({
+    changeNoticeId: v.id("changeNotices"),
+    itemId: v.id("items"),
+    workGroupId: v.string(),
+    workGroupName: v.optional(v.string()),
+    workGroupOwner: v.optional(v.string()),
+    required: v.boolean(),
+    templateId: v.optional(v.string()),
+    tasks: v.array(v.string()),
+    updatedAt: v.int64(),
+  })
+    .index("by_change_notice", ["changeNoticeId"])
+    .index("by_change_notice_item", ["changeNoticeId", "itemId"])
+    .index("by_change_notice_item_group", ["changeNoticeId", "itemId", "workGroupId"]),
   changeRequests: defineTable({
     id: v.string(),
     author: v.string(),

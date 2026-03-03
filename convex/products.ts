@@ -248,3 +248,74 @@ export const importProductBomFromPdmPlaceholder = mutation({
     };
   },
 });
+
+export const ensureProductForRouting = mutation({
+  args: {
+    productNumber: v.string(),
+    drawingNumber: v.string(),
+    revision: v.string(),
+    name: v.string(),
+    description: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const productNumber = args.productNumber.trim();
+    if (!productNumber) {
+      throw new Error("Product number is required.");
+    }
+
+    const existingProduct = await ctx.db
+      .query("products")
+      .withIndex("by_product_number", (q) => q.eq("productNumber", productNumber))
+      .unique();
+
+    if (existingProduct) {
+      const existingItem = await ctx.db
+        .query("items")
+        .withIndex("by_part_number", (q) => q.eq("partNumber", productNumber))
+        .unique();
+      if (existingItem) {
+        return {
+          productId: existingProduct._id,
+          itemId: existingItem._id,
+          created: false,
+        };
+      }
+    }
+
+    const itemId = await upsertItemByPartNumber(ctx, {
+      partNumber: productNumber,
+      drawingNumbers: args.drawingNumber.trim() ? [args.drawingNumber.trim()] : [],
+      revision: args.revision,
+      name: args.name,
+      description: args.description,
+      itemType: "product",
+    });
+
+    if (existingProduct) {
+      await ctx.db.patch("products", existingProduct._id, {
+        drawingNumber: args.drawingNumber.trim() || existingProduct.drawingNumber,
+        revision: args.revision.trim() || existingProduct.revision,
+        name: args.name.trim() || existingProduct.name,
+      });
+      return {
+        productId: existingProduct._id,
+        itemId,
+        created: false,
+      };
+    }
+
+    const productId = await ctx.db.insert("products", {
+      productNumber,
+      drawingNumber: args.drawingNumber.trim(),
+      revision: args.revision.trim(),
+      name: args.name.trim() || productNumber,
+      bom: [],
+    });
+
+    return {
+      productId,
+      itemId,
+      created: true,
+    };
+  },
+});

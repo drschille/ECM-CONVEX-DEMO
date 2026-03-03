@@ -1,7 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { paginationOptsValidator } from "convex/server";
-import { table } from "console";
 
 type SequencePrefixType = "changeRequest" | "changeNotification";
 type IntValue = bigint;
@@ -473,6 +472,229 @@ export const changeNoticeLinksForEcn = query({
         ]);
 
         return { asParent, asChild };
+    },
+});
+
+export const changeNoticeRoutingMatrix = query({
+    args: { changeNoticeId: v.id("changeNotices") },
+    handler: async (ctx, args) => {
+        const notice = await ctx.db.get(args.changeNoticeId);
+        if (!notice) {
+            throw new Error("Change notice not found");
+        }
+
+        const [rows, assignments] = await Promise.all([
+            ctx.db
+                .query("changeNoticeRoutingRows")
+                .withIndex("by_change_notice", (q) => q.eq("changeNoticeId", args.changeNoticeId))
+                .collect(),
+            ctx.db
+                .query("changeNoticeRoutingAssignments")
+                .withIndex("by_change_notice", (q) => q.eq("changeNoticeId", args.changeNoticeId))
+                .collect(),
+        ]);
+
+        const itemEntries = await Promise.all(
+            rows.map(async (row) => {
+                const item = await ctx.db.get(row.itemId);
+                return [String(row.itemId), item] as const;
+            }),
+        );
+        const itemById = new Map(itemEntries);
+
+        const assignmentByRowAndGroup = new Map<
+            string,
+            {
+                required: boolean;
+                templateId: string;
+                tasks: string[];
+                workGroupName?: string;
+                workGroupOwner?: string;
+            }
+        >();
+        for (const assignment of assignments) {
+            assignmentByRowAndGroup.set(`${String(assignment.itemId)}:${assignment.workGroupId}`, {
+                required: assignment.required,
+                templateId: assignment.templateId ?? "",
+                tasks: assignment.tasks,
+                workGroupName: assignment.workGroupName,
+                workGroupOwner: assignment.workGroupOwner,
+            });
+        }
+
+        const resultRows = rows
+            .map((row) => {
+                const item = itemById.get(String(row.itemId));
+                if (!item) {
+                    return null;
+                }
+                return {
+                    id: String(row._id),
+                    itemId: String(row.itemId),
+                    partNumber: item.partNumber,
+                    name: item.name,
+                    itemType: item.itemType,
+                };
+            })
+            .filter(
+                (
+                    row,
+                ): row is {
+                    id: string;
+                    itemId: string;
+                    partNumber: string;
+                    name: string;
+                    itemType: "product" | "raw material" | "service";
+                } => row !== null,
+            );
+
+        return {
+            rows: resultRows,
+            assignmentByRowAndGroup: Object.fromEntries(assignmentByRowAndGroup),
+        };
+    },
+});
+
+export const addChangeNoticeRoutingItem = mutation({
+    args: {
+        changeNoticeId: v.id("changeNotices"),
+        itemId: v.id("items"),
+    },
+    handler: async (ctx, args) => {
+        const notice = await ctx.db.get(args.changeNoticeId);
+        if (!notice) {
+            throw new Error("Change notice not found");
+        }
+        const item = await ctx.db.get(args.itemId);
+        if (!item) {
+            throw new Error("Item not found");
+        }
+
+        const existing = await ctx.db
+            .query("changeNoticeRoutingRows")
+            .withIndex("by_change_notice_item", (q) =>
+                q.eq("changeNoticeId", args.changeNoticeId).eq("itemId", args.itemId)
+            )
+            .unique();
+
+        if (existing) {
+            return { rowId: existing._id, deduplicated: true };
+        }
+
+        const rowId = await ctx.db.insert("changeNoticeRoutingRows", {
+            changeNoticeId: args.changeNoticeId,
+            itemId: args.itemId,
+            addedAt: nowInt(),
+        });
+
+        return { rowId, deduplicated: false };
+    },
+});
+
+export const removeChangeNoticeRoutingItem = mutation({
+    args: {
+        changeNoticeId: v.id("changeNotices"),
+        itemId: v.id("items"),
+    },
+    handler: async (ctx, args) => {
+        const row = await ctx.db
+            .query("changeNoticeRoutingRows")
+            .withIndex("by_change_notice_item", (q) =>
+                q.eq("changeNoticeId", args.changeNoticeId).eq("itemId", args.itemId)
+            )
+            .unique();
+        if (row) {
+            await ctx.db.delete(row._id);
+        }
+
+        const assignments = await ctx.db
+            .query("changeNoticeRoutingAssignments")
+            .withIndex("by_change_notice_item", (q) =>
+                q.eq("changeNoticeId", args.changeNoticeId).eq("itemId", args.itemId)
+            )
+            .collect();
+        await Promise.all(assignments.map((assignment) => ctx.db.delete(assignment._id)));
+
+        return { removed: !!row, assignmentsRemoved: assignments.length };
+    },
+});
+
+export const setChangeNoticeRoutingAssignment = mutation({
+    args: {
+        changeNoticeId: v.id("changeNotices"),
+        itemId: v.id("items"),
+        workGroupId: v.string(),
+        workGroupName: v.optional(v.string()),
+        workGroupOwner: v.optional(v.string()),
+        required: v.boolean(),
+        templateId: v.optional(v.string()),
+        tasks: v.array(v.string()),
+    },
+    handler: async (ctx, args) => {
+        const notice = await ctx.db.get(args.changeNoticeId);
+        if (!notice) {
+            throw new Error("Change notice not found");
+        }
+        const item = await ctx.db.get(args.itemId);
+        if (!item) {
+            throw new Error("Item not found");
+        }
+
+        const sanitizedTasks = args.tasks
+            .map((task) => task.trim())
+            .filter((task) => task.length > 0);
+        const templateId = args.templateId?.trim();
+
+        const existing = await ctx.db
+            .query("changeNoticeRoutingAssignments")
+            .withIndex("by_change_notice_item_group", (q) =>
+                q
+                    .eq("changeNoticeId", args.changeNoticeId)
+                    .eq("itemId", args.itemId)
+                    .eq("workGroupId", args.workGroupId)
+            )
+            .unique();
+
+        if (!args.required && !templateId && sanitizedTasks.length === 0) {
+            if (existing) {
+                await ctx.db.delete(existing._id);
+            }
+            return { saved: false, deleted: !!existing };
+        }
+
+        const row = await ctx.db
+            .query("changeNoticeRoutingRows")
+            .withIndex("by_change_notice_item", (q) =>
+                q.eq("changeNoticeId", args.changeNoticeId).eq("itemId", args.itemId)
+            )
+            .unique();
+        if (!row) {
+            await ctx.db.insert("changeNoticeRoutingRows", {
+                changeNoticeId: args.changeNoticeId,
+                itemId: args.itemId,
+                addedAt: nowInt(),
+            });
+        }
+
+        const payload = {
+            changeNoticeId: args.changeNoticeId,
+            itemId: args.itemId,
+            workGroupId: args.workGroupId,
+            workGroupName: args.workGroupName?.trim() || undefined,
+            workGroupOwner: args.workGroupOwner?.trim() || undefined,
+            required: args.required,
+            templateId: templateId || undefined,
+            tasks: sanitizedTasks,
+            updatedAt: nowInt(),
+        };
+
+        if (existing) {
+            await ctx.db.patch(existing._id, payload);
+            return { saved: true, assignmentId: existing._id };
+        }
+
+        const assignmentId = await ctx.db.insert("changeNoticeRoutingAssignments", payload);
+        return { saved: true, assignmentId };
     },
 });
 
