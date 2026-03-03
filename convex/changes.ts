@@ -1,5 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { paginationOptsValidator } from "convex/server";
+import { table } from "console";
 
 type SequencePrefixType = "changeRequest" | "changeNotification";
 type IntValue = bigint;
@@ -238,14 +240,40 @@ async function createChangeNotificationWithNextId(
 }
 
 export const changeRequests = query({
-    args: { year: v.optional(v.int64()) },
+    args: {
+        year: v.optional(v.int64()),
+        paginationOpts: paginationOptsValidator
+    },
+    returns: v.object({
+        page: v.array(
+            v.object({
+                _id: v.id("changeRequests"),
+                id: v.string(),
+                description: v.string(),
+                author: v.optional(v.string()),
+                authorName: v.optional(v.string()),
+                authorEmail: v.optional(v.string()),
+                timestamp: v.int64(),
+                year: v.int64(),
+                state: v.union(v.literal("proposed"), v.literal("started"), v.literal("completed"), v.literal("cancelled")),
+                _creationTime: v.number(),
+            })
+        ),
+        isDone: v.boolean(),
+        continueCursor: v.union(v.string(), v.null()),
+    }),
     handler: async (ctx, args) => {
         const year = args.year ?? currentYearInt();
-        return await ctx.db
+        const result = await ctx.db
             .query("changeRequests")
             .withIndex("change_requests_by_year", (q: any) => q.eq("year", year))
             .order("asc")
-            .take(100);
+            .paginate(args.paginationOpts);
+        return {
+            page: result.page,
+            isDone: result.isDone,
+            continueCursor: result.continueCursor,
+        };
     },
 });
 
@@ -282,7 +310,6 @@ export const nextChangeNotificationId = query({
 });
 
 export const sequencePrefixSettings = query({
-    args: {},
     handler: async (ctx) => {
         const [changeRequest, changeNotification] = await Promise.all([
             getSequencePrefix(ctx, "changeRequest"),

@@ -48,14 +48,12 @@ async function upsertItemByPartNumber(
 }
 
 export const listItems = query({
-  args: {},
   handler: async (ctx) => {
     return await ctx.db.query("items").withIndex("by_part_number").order("asc").take(500);
   },
 });
 
 export const listProducts = query({
-  args: {},
   handler: async (ctx) => {
     return await ctx.db.query("products").withIndex("by_product_number").order("asc").take(200);
   },

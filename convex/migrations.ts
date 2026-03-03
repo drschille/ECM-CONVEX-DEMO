@@ -9,7 +9,6 @@ function toInt64(value: unknown): bigint | null {
 }
 
 export const auditTemporalNumberFields = query({
-  args: {},
   handler: async (ctx) => {
     let changeRequests = 0;
     let changeNotices = 0;
